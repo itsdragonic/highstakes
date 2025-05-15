@@ -61,10 +61,10 @@ const pillarPositions = [
     { x: 97, y: 72, radius: 4 * inches },
 
     // Alliance and wall stakes
-    {x: 0, y: 72, radius: 2 * inches, rings: ["red"]}, // red alliance stake with a red ring
+    {x: 0, y: 72, radius: 2 * inches}, // red alliance stake with a red ring
     {x: 144, y: 72, radius: 2 * inches}, // blue alliance stake
-    {x: 72, y: 0, radius: 2 * inches, rings: ["red"]}, // top wall stake with preplaced red ring
-    {x: 72, y: 144, radius: 2 * inches, rings: ["blue"]} // bottom wall stake with preplaced blue ring
+    {x: 72, y: 0, radius: 2 * inches}, // top wall stake with preplaced red ring
+    {x: 72, y: 144, radius: 2 * inches} // bottom wall stake with preplaced blue ring
 ];
 
 // Add rings property to pillar bodies if present in pillarPositions
@@ -195,6 +195,7 @@ let conveyorSpeed = 600;
 let wallStakeScoreHoldStart = null; // Track when t is first held for wall stake scoring
 
 let lastRingPickupTime = 0; // timestamp of last ring pickup
+const holdTime = 1500;
 
 Events.on(engine, 'beforeUpdate', () => {
     // Prevent grabbing/releasing mogos if robot is pressed too far into an edge or corner
@@ -454,7 +455,7 @@ Events.on(engine, 'beforeUpdate', () => {
                 if (!anim.wallStakeHoldStart) {
                     anim.wallStakeHoldStart = now;
                 }
-                if (now - anim.wallStakeHoldStart >= 1500) {
+                if (now - anim.wallStakeHoldStart >= holdTime) {
                     if (!wallStake.rings) wallStake.rings = [];
                     wallStake.rings.push(anim.color === red ? "red" : "blue");
                     animatingRings.splice(i, 1);
@@ -560,17 +561,17 @@ Events.on(engine, 'beforeUpdate', () => {
         }
 
         // Remove animation after 1.5s (to allow ejected ring to show briefly)
-        if (anim.done && Math.abs(anim.elapsed) > 1500) {
+        if (anim.done && Math.abs(anim.elapsed) > holdTime) {
             animatingRings.splice(i, 1);
         }
     }
 });
-
+const triSize = 19 * inches;
 
 Events.on(render, 'afterRender', () => {
     const ctx = render.context;
 
-    // Draw 4 translucent corner right angle triangles
+    // Draw 4 corner right angle triangles
     function drawCornerTriangle(ctx, x, y, size, color, flipX, flipY) {
         ctx.save();
         ctx.beginPath();
@@ -584,7 +585,6 @@ Events.on(render, 'afterRender', () => {
         ctx.globalAlpha = 1.0;
         ctx.restore();
     }
-    const triSize = 12 * inches;
     // Top-left
     drawCornerTriangle(ctx, 0, 0, triSize, "transparent", false, false);
     // Top-right
@@ -720,7 +720,6 @@ Events.on(render, 'afterRender', () => {
                                 let x = pillar.position.x + dx;
 
                                 // Draw the circular progress indicator
-                                const holdTime = 1500;
                                 const elapsed = Math.min(performance.now() - anim.wallStakeHoldStart, holdTime);
                                 const pct = elapsed / holdTime;
                                 const r = 10;
@@ -846,7 +845,6 @@ function drawSingleRing(ctx, pos, color, angle = 0, innerColor = null) {
 
 // Utility: check if a point is in a right triangle at a corner
 function pointInCornerTriangle(px, py, corner) {
-    const triSize = 12 * inches;
     if (corner === "top-left") {
         return px >= 0 && px <= triSize && py >= 0 && py <= triSize && (px + py <= triSize);
     } else if (corner === "top-right") {
@@ -1017,10 +1015,10 @@ function drawStakeRingStack(ctx, stake, slotCount, side = "left", verticalOffset
     let dx = 0, dy = 0;
 
     if (side === "left") {
-        dx = -(radius + 14);
+        dx = -(radius + 18);
         dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
     } else if (side === "right") {
-        dx = radius + 14;
+        dx = radius + 18;
         dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
     }
 
