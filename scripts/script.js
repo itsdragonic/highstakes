@@ -97,7 +97,6 @@ const mogoPositions = [
 let mogos = mogoPositions.map((pos, i) => {
     const body = createMogo(pos.x * inches, pos.y * inches);
     body.rings = [];
-    if (i === 0) body.rings.push("blue");
     return body;
 });
 
@@ -108,18 +107,41 @@ const blue = '#286fb5';
 const RING_OUTER_RADIUS = 7 / 2 * inches;
 const RING_INNER_RADIUS = RING_OUTER_RADIUS - (2 * inches);
 const RING_POSITIONS = [
-    { x: 121, y: 121, color: red },
-    { x: 132, y: 73, color: red },
-    { x: 23, y: 121, color: blue },
-    { x: 12, y: 73, color: blue },
+    // corners
+    { x: 4, y: 4, color: blue, rings: ["red","blue","red"] },
+    { x: 140, y: 4, color: red, rings: ["blue","red","blue"] },
+    { x: 4, y: 140, color: blue, rings: ["red","blue","red"] },
+    { x: 140, y: 140, color: red, rings: ["blue","red","blue"] },
 
+    // negative side
+    { x: 69, y: 20, color: blue, rings: ["red"] },
+    { x: 69, y: 27, color: blue, rings: ["red"] },
+    { x: 76, y: 20, color: red, rings: ["blue"] },
+    { x: 76, y: 27, color: red, rings: ["blue"] },
+
+    { x: 48, y: 23, color: blue, rings: ["red"] },
+    { x: 96, y: 23, color: red, rings: ["blue"] },
+
+    // positive side
+    { x: 121, y: 121, color: red },
+    { x: 23, y: 121, color: blue },
+    { x: 48, y: 121, color: blue, rings: ["red"] },
+    { x: 96, y: 121, color: red, rings: ["blue"] },
+
+    // alliance sides
+    { x: 132, y: 73, color: red },
+    { x: 12, y: 73, color: blue },
+    { x: 121, y: 73, color: blue, rings: ["red"] },
+    { x: 23, y: 73, color: red, rings: ["blue"] },
+
+    // center
     { x: 69, y: 70, color: blue },
     { x: 69, y: 76, color: blue },
     { x: 76, y: 70, color: red },
     { x: 76, y: 76, color: red },
 ];
 
-const rings = RING_POSITIONS.map(({ x, y, color }) => {
+const rings = RING_POSITIONS.map(({ x, y, color, rings }, i) => {
     const outer = Bodies.circle(x * inches, y * inches, RING_OUTER_RADIUS, {
         isSensor: false,
         friction: 1.0,
@@ -132,6 +154,8 @@ const rings = RING_POSITIONS.map(({ x, y, color }) => {
         isSensor: true,
         render: { visible: false }
     });
+    // Use rings property if present
+    if (rings && Array.isArray(rings)) outer.rings = [...rings];
     return { outer, inner, color };
 });
 
@@ -169,6 +193,8 @@ let animatingRings = []; // {color, start, relFrom, relTo, relAngle, done, elaps
 let conveyorSpeed = 600;
 
 let wallStakeScoreHoldStart = null; // Track when t is first held for wall stake scoring
+
+let lastRingPickupTime = 0; // timestamp of last ring pickup
 
 Events.on(engine, 'beforeUpdate', () => {
     // Prevent grabbing/releasing mogos if robot is pressed too far into an edge or corner
@@ -279,43 +305,67 @@ Events.on(engine, 'beforeUpdate', () => {
 
     // Ring grabbing: remove ring if in front and input is held
     if (keys.j || mouseDown) {
-        const frontOffset = ROBOT_HEIGHT / 2;
-        const backOffset = -ROBOT_HEIGHT * 0.6;
-        // Calculate RELATIVE front/back (relative to robot center, facing forward)
-        const relFront = {
-            x: Math.cos(robot.angle) * frontOffset,
-            y: Math.sin(robot.angle) * frontOffset
-        };
-        const relBack = {
-            x: Math.cos(robot.angle) * backOffset,
-            y: Math.sin(robot.angle) * backOffset
-        };
-        // World positions for hit detection
-        const frontPos = {
-            x: robot.position.x + relFront.x,
-            y: robot.position.y + relFront.y
-        };
-        for (let i = 0; i < rings.length; ++i) {
-            const ring = rings[i];
-            const dist = Matter.Vector.magnitude(Matter.Vector.sub(ring.outer.position, frontPos));
-            if (dist < RING_OUTER_RADIUS + 8) {
-                World.remove(world, ring.outer);
-                World.remove(world, ring.inner);
-                animatingRings.push({
-                    color: ring.color,
-                    start: performance.now(),
-                    relFrom: { x: frontOffset, y: 0 },
-                    relTo: { x: backOffset, y: 0 },
-                    relAngle: 0,
-                    elapsed: 0,
-                    lastTimestamp: performance.now(),
-                    paused: false,
-                    direction: 1, // 1 = forward, -1 = reverse
-                    ejectedFront: false,
-                    ejectedBack: false
-                });
-                rings.splice(i, 1);
-                break;
+        const now = performance.now();
+        if (now - lastRingPickupTime >= 500) { // 0.5s cooldown
+            const frontOffset = ROBOT_HEIGHT / 2;
+            const backOffset = -ROBOT_HEIGHT * 0.6;
+            // Calculate RELATIVE front/back (relative to robot center, facing forward)
+            const relFront = {
+                x: Math.cos(robot.angle) * frontOffset,
+                y: Math.sin(robot.angle) * frontOffset
+            };
+            const relBack = {
+                x: Math.cos(robot.angle) * backOffset,
+                y: Math.sin(robot.angle) * backOffset
+            };
+            // World positions for hit detection
+            const frontPos = {
+                x: robot.position.x + relFront.x,
+                y: robot.position.y + relFront.y
+            };
+            for (let i = 0; i < rings.length; ++i) {
+                const ring = rings[i];
+                const dist = Matter.Vector.magnitude(Matter.Vector.sub(ring.outer.position, frontPos));
+                if (dist < RING_OUTER_RADIUS + 8) {
+                    // --- Virtual below logic using .rings property on outer body ---
+                    if (ring.outer.rings && ring.outer.rings.length > 0) {
+                        const belowColor = ring.outer.rings.pop();
+                        animatingRings.push({
+                            color: belowColor === "red" ? red : blue,
+                            start: performance.now(),
+                            relFrom: { x: frontOffset, y: 0 },
+                            relTo: { x: backOffset, y: 0 },
+                            relAngle: 0,
+                            elapsed: 0,
+                            lastTimestamp: performance.now(),
+                            paused: false,
+                            direction: 1, // 1 = forward, -1 = reverse
+                            ejectedFront: false,
+                            ejectedBack: false
+                        });
+                        lastRingPickupTime = now;
+                        break;
+                    }
+                    // ...existing code...
+                    World.remove(world, ring.outer);
+                    World.remove(world, ring.inner);
+                    animatingRings.push({
+                        color: ring.color,
+                        start: performance.now(),
+                        relFrom: { x: frontOffset, y: 0 },
+                        relTo: { x: backOffset, y: 0 },
+                        relAngle: 0,
+                        elapsed: 0,
+                        lastTimestamp: performance.now(),
+                        paused: false,
+                        direction: 1, // 1 = forward, -1 = reverse
+                        ejectedFront: false,
+                        ejectedBack: false
+                    });
+                    rings.splice(i, 1);
+                    lastRingPickupTime = now;
+                    break;
+                }
             }
         }
     }
@@ -719,6 +769,24 @@ Events.on(render, 'afterRender', () => {
     });
 
     drawRings(ctx);
+
+    // --- Draw a small colored dot inside field rings with .rings attribute ---
+    rings.forEach(ring => {
+        if (ring.outer.rings && ring.outer.rings.length > 0) {
+            const baseX = ring.outer.position.x;
+            const baseY = ring.outer.position.y;
+            // Use the color of the bottom ring in the array
+            const bottomColor = ring.outer.rings[ring.outer.rings.length - 1] === "red" ? red : blue;
+            // Draw a small filled circle at the center (no hitbox, just visual)
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(baseX, baseY, RING_INNER_RADIUS / 1.5, 0, 2 * Math.PI, false);
+            ctx.fillStyle = bottomColor;
+            ctx.globalAlpha = 0.95;
+            ctx.fill();
+            ctx.restore();
+        }
+    });
 
     // Draw animating rings and ejected rings
     const now = performance.now();
