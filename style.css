@@ -1,0 +1,29 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #f0f0f0;
+}
+
+#game-field {
+    position: relative;
+    width: 600px;
+    height: 600px;
+    background-color: #fff;
+    border: 2px solid #000;
+}
+
+.player {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    background-color: red;
+}
+
+#player1 { background-color: red; }
+#player2 { background-color: blue; }
+#player3 { background-color: green; }
+#player4 { background-color: yellow; }
