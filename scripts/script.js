@@ -36,7 +36,7 @@ drawBackground();
 positionBackground();
 
 // Create robot(s)
-const robot = Bodies.rectangle(5, FIELD_SIZE / 2, ROBOT_HEIGHT, ROBOT_WIDTH, {
+const robot = Bodies.rectangle(50, 400, ROBOT_HEIGHT, ROBOT_WIDTH, {
     frictionAir: 0.2,
     render: {
         fillStyle: '#0077ff',
@@ -61,14 +61,15 @@ const pillarPositions = [
     { x: 97, y: 72, radius: 4 * inches },
 
     // Alliance and wall stakes
-    {x: 0, y: 72, radius: 2 * inches},
-    {x: 144, y: 72, radius: 2 * inches},
-    {x: 72, y: 0, radius: 2 * inches},
-    {x: 72, y: 144, radius: 2 * inches}
+    {x: 0, y: 72, radius: 2 * inches, rings: ["red"]}, // red alliance stake with a red ring
+    {x: 144, y: 72, radius: 2 * inches}, // blue alliance stake
+    {x: 72, y: 0, radius: 2 * inches, rings: ["red"]}, // top wall stake with preplaced red ring
+    {x: 72, y: 144, radius: 2 * inches, rings: ["blue"]} // bottom wall stake with preplaced blue ring
 ];
 
-const pillars = pillarPositions.map(pos =>
-    Bodies.circle(
+// Add rings property to pillar bodies if present in pillarPositions
+const pillars = pillarPositions.map(pos => {
+    const body = Bodies.circle(
         pos.x * inches,
         pos.y * inches,
         pos.radius,
@@ -76,11 +77,12 @@ const pillars = pillarPositions.map(pos =>
             isStatic: true,
             render: { fillStyle: 'transparent', visible: true }
         }
-    )
-);
+    );
+    if (pos.rings) body.rings = [...pos.rings];
+    return body;
+});
 
 // Create Mobile Goals (mogos)
-// Add a 'rings' array to each mogo, max 6, e.g. ["red", "blue"]
 const MOGO_RADIUS = 6 * inches;
 const MOGO_COLOR = '#bcc927';
 const mogoPositions = [
@@ -139,22 +141,34 @@ rings.forEach(ring => {
 
 World.add(world, [robot, ...boundaries, ...pillars, ...mogos]);
 
-const keys = { w: false, a: false, s: false, d: false, r: false, j: false };
+const keys = { w: false, a: false, s: false, d: false, r: false, j: false, l: false, t: false };
 let mouseDown = false;
+let rightMouseDown = false;
 
 document.addEventListener('keydown', e => { if (e.key in keys) keys[e.key] = true; });
 document.addEventListener('keyup', e => { if (e.key in keys) keys[e.key] = false; });
-document.addEventListener('mousedown', e => { if (e.button === 0) mouseDown = true; });
-document.addEventListener('mouseup', e => { if (e.button === 0) mouseDown = false; });
+document.addEventListener('mousedown', e => { 
+    if (e.button === 0) mouseDown = true; 
+    if (e.button === 2) rightMouseDown = true;
+});
+document.addEventListener('mouseup', e => { 
+    if (e.button === 0) mouseDown = false; 
+    if (e.button === 2) rightMouseDown = false;
+});
+// Prevent context menu on right click
+document.addEventListener('contextmenu', e => e.preventDefault());
 
-const forceMagnitude = 0.0075;
+const forceMagnitude = 0.01;
 const turnSpeed = 0.04;
 let attachedMogo = null;
 let lastRState = false;
 
 // Animation state for grabbed rings
 // Now also track if the animation has been "scored" or "ejected"
-let animatingRings = []; // {color, start, relFrom, relTo, relAngle, done}
+let animatingRings = []; // {color, start, relFrom, relTo, relAngle, done, elapsed, lastTimestamp, paused, direction, ejectedFront, ejectedBack}
+let conveyorSpeed = 600;
+
+let wallStakeScoreHoldStart = null; // Track when t is first held for wall stake scoring
 
 Events.on(engine, 'beforeUpdate', () => {
     // Prevent grabbing/releasing mogos if robot is pressed too far into an edge or corner
@@ -173,6 +187,15 @@ Events.on(engine, 'beforeUpdate', () => {
             return true;
         }
         return false;
+    }
+
+    function isPositionTooCloseToEdge(x, y, margin = 2) {
+        return (
+            x < margin ||
+            x > FIELD_SIZE - margin ||
+            y < margin ||
+            y > FIELD_SIZE - margin
+        );
     }
 
     if (keys.r !== lastRState) {
@@ -278,13 +301,18 @@ Events.on(engine, 'beforeUpdate', () => {
             if (dist < RING_OUTER_RADIUS + 8) {
                 World.remove(world, ring.outer);
                 World.remove(world, ring.inner);
-                // Animation: store RELATIVE positions, but relFrom should be (frontOffset, 0) in robot's local frame
                 animatingRings.push({
                     color: ring.color,
                     start: performance.now(),
                     relFrom: { x: frontOffset, y: 0 },
                     relTo: { x: backOffset, y: 0 },
-                    relAngle: 0
+                    relAngle: 0,
+                    elapsed: 0,
+                    lastTimestamp: performance.now(),
+                    paused: false,
+                    direction: 1, // 1 = forward, -1 = reverse
+                    ejectedFront: false,
+                    ejectedBack: false
                 });
                 rings.splice(i, 1);
                 break;
@@ -292,22 +320,173 @@ Events.on(engine, 'beforeUpdate', () => {
         }
     }
 
+    // Helper: find alliance stake adjacent to a given (x, y)
+    function getAdjacentAllianceStake(x, y, margin = 12) {
+        for (const pillar of pillars) {
+            // Only alliance stakes (x=0 or x=144*inches, y=72*inches)
+            if (
+                (pillar.position.x === 0 || pillar.position.x === 144 * inches) &&
+                pillar.position.y === 72 * inches
+            ) {
+                const dist = Matter.Vector.magnitude(Matter.Vector.sub({ x, y }, pillar.position));
+                if (dist < (pillar.circleRadius || pillar.radius || 2 * inches) + margin) {
+                    return pillar;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Helper: find wall stake adjacent to a given (x, y)
+    function getAdjacentWallStake(x, y, margin = 12) {
+        for (const pillar of pillars) {
+            // Only wall stakes (x=72*inches, y=0 or y=144*inches)
+            if (
+                pillar.position.x === 72 * inches &&
+                (pillar.position.y === 0 || pillar.position.y === 144 * inches)
+            ) {
+                const dist = Matter.Vector.magnitude(Matter.Vector.sub({ x, y }, pillar.position));
+                if (dist < (pillar.circleRadius || pillar.radius || 2 * inches) + margin) {
+                    return pillar;
+                }
+            }
+        }
+        return null;
+    }
+
     // Remove finished animations (after 1 second) and handle scoring/ejection
     const now = performance.now();
     for (let i = animatingRings.length - 1; i >= 0; --i) {
         const anim = animatingRings[i];
-        const t = Math.min((now - anim.start) / 1000, 1);
-        if (!anim.done && t >= 1) {
-            // Animation finished, handle scoring or ejection
-            if (attachedMogo && attachedMogo.rings && attachedMogo.rings.length < 6) {
-                // Score on attached mogo
-                attachedMogo.rings.push(anim.color === red ? "red" : "blue");
+
+        // Determine direction: forward (j/left mouse), reverse (l/right mouse)
+        let forward = keys.j || mouseDown;
+        let reverse = keys.l || rightMouseDown;
+
+        // If both are held, prioritize reverse
+        let direction = 0;
+        if (reverse) direction = -1;
+        else if (forward) direction = 1;
+
+        // Only update direction if not done
+        if (!anim.done) {
+            if (direction !== 0) {
+                if (anim.paused || anim.direction !== direction) {
+                    anim.lastTimestamp = now;
+                }
+                anim.paused = false;
+                anim.direction = direction;
+                // Advance or reverse animation
+                let delta = now - anim.lastTimestamp;
+                anim.lastTimestamp = now;
+                anim.elapsed += delta * direction;
+                // Clamp elapsed between 0 and ANIMATION_DURATION
+                if (anim.elapsed > conveyorSpeed) anim.elapsed = conveyorSpeed;
+                if (anim.elapsed < 0) anim.elapsed = 0;
             } else {
-                // Eject out the back as a new ring with hitbox
+                anim.paused = true;
+                anim.lastTimestamp = now;
+            }
+        }
+
+        const t = Math.min(Math.max(anim.elapsed / conveyorSpeed, 0), 1);
+
+        // --- Wall stake scoring logic with hold ---
+        // If t is held, and the front of the robot is adjacent to a wall stake, start/continue hold timer
+        if (!anim.done) {
+            const frontOffset = ROBOT_HEIGHT / 2;
+            const frontX = robot.position.x + Math.cos(robot.angle) * frontOffset;
+            const frontY = robot.position.y + Math.sin(robot.angle) * frontOffset;
+            const wallStake = getAdjacentWallStake(frontX, frontY);
+
+            // Only track hold for the first animating ring (one at a time)
+            if (i === animatingRings.length - 1 && keys.t && wallStake && (!wallStake.rings || wallStake.rings.length < 6)) {
+                if (!anim.wallStakeHoldStart) {
+                    anim.wallStakeHoldStart = now;
+                }
+                if (now - anim.wallStakeHoldStart >= 1500) {
+                    if (!wallStake.rings) wallStake.rings = [];
+                    wallStake.rings.push(anim.color === red ? "red" : "blue");
+                    animatingRings.splice(i, 1);
+                    continue;
+                }
+            } else {
+                // Reset hold timer if t is not held or not adjacent
+                anim.wallStakeHoldStart = null;
+            }
+        }
+
+        // Forward completion: score/eject out back
+        if (!anim.done && anim.direction === 1 && t >= 1 && !anim.ejectedBack) {
+            // Try to score on alliance stake if not holding a mogo and back is adjacent
+            if (!attachedMogo) {
+                const backOffset = -ROBOT_HEIGHT * 0.8;
+                const backX = robot.position.x + Math.cos(robot.angle) * backOffset;
+                const backY = robot.position.y + Math.sin(robot.angle) * backOffset;
+                const stake = getAdjacentAllianceStake(backX, backY);
+                if (stake && (!stake.rings || stake.rings.length < 2)) {
+                    // Only allow scoring if ring color matches alliance
+                    // Red alliance: x=0, Blue alliance: x=144*inches
+                    const isRedStake = stake.position.x === 0;
+                    const isBlueStake = stake.position.x === 144 * inches;
+                    if (
+                        (isRedStake && anim.color === red) ||
+                        (isBlueStake && anim.color === blue)
+                    ) {
+                        if (!stake.rings) stake.rings = [];
+                        stake.rings.push(anim.color === red ? "red" : "blue");
+                        anim.done = true;
+                        anim.ejectedBack = true;
+                        anim.eject = null;
+                        continue; // skip normal ejection
+                    }
+                    // If color does not match, do nothing (ring is not scored or ejected)
+                    // Animation will remain until user reverses or moves away
+                    continue;
+                }
+            }
+            // Normal ejection logic
+            if (attachedMogo && attachedMogo.rings && attachedMogo.rings.length < 6) {
+                attachedMogo.rings.push(anim.color === red ? "red" : "blue");
+                anim.done = true;
+                anim.ejectedBack = true;
+                anim.eject = null;
+            } else {
+                // Eject out the back as a new ring with hitbox, only if not too close to edge
                 const backOffset = -ROBOT_HEIGHT * 0.8;
                 const ejectX = robot.position.x + Math.cos(robot.angle) * backOffset;
                 const ejectY = robot.position.y + Math.sin(robot.angle) * backOffset;
-                // Create a new ring body at the ejection position
+                if (!isPositionTooCloseToEdge(ejectX, ejectY)) {
+                    const color = anim.color;
+                    const outer = Bodies.circle(ejectX, ejectY, RING_OUTER_RADIUS, {
+                        isSensor: false,
+                        friction: 1.0,
+                        frictionStatic: 1.0,
+                        restitution: 0,
+                        density: 0.05,
+                        render: { visible: false }
+                    });
+                    const inner = Bodies.circle(ejectX, ejectY, RING_INNER_RADIUS, {
+                        isSensor: true,
+                        render: { visible: false }
+                    });
+                    rings.push({ outer, inner, color });
+                    World.add(world, [outer, inner]);
+                    anim.done = true;
+                    anim.ejectedBack = true;
+                    anim.eject = null;
+                }
+                // If too close to edge, do not eject or finish animation (wait until not at edge)
+            }
+        }
+
+        // Reverse completion: eject out front
+        if (!anim.done && anim.direction === -1 && t <= 0 && !anim.ejectedFront) {
+            // Eject out the front as a new ring with hitbox, only if not too close to edge
+            const frontOffset = ROBOT_HEIGHT / 2 + 4;
+            const ejectX = robot.position.x + Math.cos(robot.angle) * frontOffset;
+            const ejectY = robot.position.y + Math.sin(robot.angle) * frontOffset;
+            if (!isPositionTooCloseToEdge(ejectX, ejectY)) {
                 const color = anim.color;
                 const outer = Bodies.circle(ejectX, ejectY, RING_OUTER_RADIUS, {
                     isSensor: false,
@@ -323,11 +502,15 @@ Events.on(engine, 'beforeUpdate', () => {
                 });
                 rings.push({ outer, inner, color });
                 World.add(world, [outer, inner]);
+                anim.done = true;
+                anim.ejectedFront = true;
+                anim.eject = null;
             }
-            anim.done = true;
+            // If too close to edge, do not eject or finish animation (wait until not at edge)
         }
+
         // Remove animation after 1.5s (to allow ejected ring to show briefly)
-        if (now - anim.start > 1500) {
+        if (anim.done && Math.abs(anim.elapsed) > 1500) {
             animatingRings.splice(i, 1);
         }
     }
@@ -383,12 +566,164 @@ Events.on(render, 'afterRender', () => {
         }
     }
 
+    // Draw visible ring for alliance stakes (pillar at x=0 or x=144*inches, y=72) if it has rings
+    pillars.forEach(pillar => {
+        // Red alliance stake
+        if (pillar.position.x === 0 && pillar.position.y === 72 * inches && pillar.rings && pillar.rings.length > 0) {
+            const color = pillar.rings[pillar.rings.length - 1] === "red" ? red : blue;
+            drawSingleRing(ctx, { x: pillar.position.x, y: pillar.position.y }, color, 0, null);
+        }
+        // Blue alliance stake
+        if (pillar.position.x === 144 * inches && pillar.position.y === 72 * inches && pillar.rings && pillar.rings.length > 0) {
+            const color = pillar.rings[pillar.rings.length - 1] === "red" ? red : blue;
+            drawSingleRing(ctx, { x: pillar.position.x, y: pillar.position.y }, color, 0, null);
+        }
+        // Top wall stake
+        if (pillar.position.x === 72 * inches && pillar.position.y === 0 && pillar.rings && pillar.rings.length > 0) {
+            const color = pillar.rings[pillar.rings.length - 1] === "red" ? red : blue;
+            drawSingleRing(ctx, { x: pillar.position.x, y: pillar.position.y }, color, 0, null);
+        }
+        // Bottom wall stake
+        if (pillar.position.x === 72 * inches && pillar.position.y === 144 * inches && pillar.rings && pillar.rings.length > 0) {
+            const color = pillar.rings[pillar.rings.length - 1] === "red" ? red : blue;
+            drawSingleRing(ctx, { x: pillar.position.x, y: pillar.position.y }, color, 0, null);
+        }
+    });
+
+    // Draw ring stack indicators for alliance and wall stakes
+    pillars.forEach(pillar => {
+        // Alliance stakes: x=0 or x=144*inches, y=72*inches, up to 2 rings
+        // Wall stakes: y=0 or y=144*inches, x=72*inches, up to 6 rings
+        let slotCount = 0;
+        let side = "left"; // default
+        let verticalOffset = 0; // for wall stakes
+        if (
+            pillar.position.x === 0 && pillar.position.y === 72 * inches
+        ) {
+            slotCount = 2;
+            side = "right";
+        } else if (
+            pillar.position.x === 144 * inches && pillar.position.y === 72 * inches
+        ) {
+            slotCount = 2;
+            side = "left";
+        } else if (
+            pillar.position.x === 72 * inches && pillar.position.y === 0
+        ) {
+            slotCount = 6;
+            side = "left";
+            verticalOffset = 32; // move rectangles lower for top wall stake
+        } else if (
+            pillar.position.x === 72 * inches && pillar.position.y === 144 * inches
+        ) {
+            slotCount = 6;
+            side = "left";
+            verticalOffset = -32; // move rectangles higher for bottom wall stake
+        }
+        if (slotCount > 0) {
+            drawStakeRingStack(ctx, pillar, slotCount, side, verticalOffset);
+
+            // --- Wall stake scoring hold animation ---
+            // Only for the wall stake being loaded on, and always to the left of the rectangles
+            if (
+                (pillar.position.x === 72 * inches && (pillar.position.y === 0 || pillar.position.y === 144 * inches))
+            ) {
+                // Find animating ring that is waiting to score here (and only here)
+                for (let i = 0; i < animatingRings.length; ++i) {
+                    const anim = animatingRings[i];
+                    if (
+                        !anim.done &&
+                        anim.wallStakeHoldStart
+                    ) {
+                        // Check if robot is adjacent to THIS wall stake (within 20 units)
+                        const frontOffset = ROBOT_HEIGHT / 2;
+                        const frontX = robot.position.x + Math.cos(robot.angle) * frontOffset;
+                        const frontY = robot.position.y + Math.sin(robot.angle) * frontOffset;
+                        if (
+                            Math.abs(pillar.position.x - frontX) < 20 &&
+                            Math.abs(pillar.position.y - frontY) < 20
+                        ) {
+                            // Only show for the first animating ring (the one being scored)
+                            if (i === animatingRings.length - 1) {
+                                // Always place the animation to the left of the rectangles
+                                const slotWidth = 20;
+                                const slotHeight = 8;
+                                const slotSpacing = 2;
+                                const radius = pillar.circleRadius || pillar.radius || (2 * inches);
+                                let dx = -(radius + 38); // left of rectangles
+                                let dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
+                                // For vertical stacking, find the slot index
+                                let slotIdx = 0;
+                                if (pillar.position.y === 0) {
+                                    slotIdx = 0;
+                                } else {
+                                    slotIdx = Math.min(pillar.rings ? pillar.rings.length : 0, slotCount - 1);
+                                }
+                                let y;
+                                if (pillar.position.y === 0) {
+                                    // Top wall stake: slightly lower
+                                    y = pillar.position.y + dy - (slotCount - 1 - slotIdx) * (slotHeight + slotSpacing) + 10;
+                                } else {
+                                    // Bottom wall stake: slightly higher
+                                    y = pillar.position.y + dy - slotIdx * (slotHeight + slotSpacing) - 10;
+                                }
+                                let x = pillar.position.x + dx;
+
+                                // Draw the circular progress indicator
+                                const holdTime = 1500;
+                                const elapsed = Math.min(performance.now() - anim.wallStakeHoldStart, holdTime);
+                                const pct = elapsed / holdTime;
+                                const r = 10;
+                                ctx.save();
+                                ctx.translate(x, y);
+                                // Draw faint background circle
+                                ctx.globalAlpha = 0.18;
+                                ctx.beginPath();
+                                ctx.arc(0, 0, r, 0, 2 * Math.PI);
+                                ctx.fillStyle = "#fff";
+                                ctx.fill();
+                                ctx.globalAlpha = 1.0;
+                                // Draw rotating white arc trail (start at top)
+                                const trailLen = Math.PI * 0.7;
+                                for (let t = 0; t < trailLen; t += 0.15) {
+                                    let a = (-Math.PI / 2) + (pct * 2 * Math.PI) - t;
+                                    ctx.save();
+                                    ctx.globalAlpha = 0.15 + 0.25 * (1 - t / trailLen);
+                                    ctx.beginPath();
+                                    ctx.arc(0, 0, r, a, a + 0.12);
+                                    ctx.strokeStyle = "#fff";
+                                    ctx.lineWidth = 3;
+                                    ctx.stroke();
+                                    ctx.restore();
+                                }
+                                // Draw leading dot (start at top)
+                                ctx.save();
+                                ctx.rotate(-Math.PI / 2 + pct * 2 * Math.PI);
+                                ctx.globalAlpha = 0.8;
+                                ctx.beginPath();
+                                ctx.arc(r, 0, 3, 0, 2 * Math.PI);
+                                ctx.fillStyle = "#fff";
+                                ctx.shadowColor = "#fff";
+                                ctx.shadowBlur = 6;
+                                ctx.fill();
+                                ctx.restore();
+
+                                ctx.restore();
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
     drawRings(ctx);
 
     // Draw animating rings and ejected rings
     const now = performance.now();
     animatingRings.forEach(anim => {
-        const t = Math.min((now - anim.start) / 1000, 1);
+        const t = Math.min(Math.max(anim.elapsed / conveyorSpeed, 0), 1);
         if (!anim.done) {
             // Animate in robot-relative coordinates, so ring always stays inside robot
             const relX = anim.relFrom.x * (1 - t) + anim.relTo.x * t;
@@ -397,11 +732,10 @@ Events.on(render, 'afterRender', () => {
             const sin = Math.sin(robot.angle);
             const x = robot.position.x + relX * cos - relY * sin;
             const y = robot.position.y + relX * sin + relY * cos;
-            drawSingleRing(ctx, { x, y }, anim.color, robot.angle + (anim.relAngle || 0));
-        } else if (anim.eject && now - anim.start < 1500) {
-            // Draw ejected ring for a brief moment
-            drawSingleRing(ctx, { x: anim.eject.x, y: anim.eject.y }, anim.eject.color, anim.eject.angle);
+            // Use robot color for the inside of animating rings
+            drawSingleRing(ctx, { x, y }, anim.color, robot.angle + (anim.relAngle || 0), robot.render.fillStyle);
         }
+        // No need to draw ejected ring here, as it's added to rings[]
     });
     updateScoreboard();
 });
@@ -468,7 +802,7 @@ function updateScoreboard() {
             if (rings[i] === "red") r += 1 * multiplier;
             else if (rings[i] === "blue") b += 1 * multiplier;
         }
-        // Top ring (last in array) is worth 3 * multiplier * 2 if doubled
+        // Top ring (last in array) is worth 3 * multiplier
         if (rings.length > 0) {
             if (rings[rings.length - 1] === "red") r += 3 * multiplier;
             else if (rings[rings.length - 1] === "blue") b += 3 * multiplier;
@@ -503,6 +837,46 @@ function updateScoreboard() {
         red += s.red;
         blue += s.blue;
     }
+
+    // Score alliance and wall stakes
+    pillars.forEach(pillar => {
+        // Alliance stakes (x=0 or x=144*inches, y=72*inches)
+        if (
+            (pillar.position.x === 0 || pillar.position.x === 144 * inches) &&
+            pillar.position.y === 72 * inches &&
+            pillar.rings && pillar.rings.length > 0
+        ) {
+            // No multiplier for alliance stakes
+            let r = 0, b = 0;
+            for (let i = 0; i < pillar.rings.length - 1; ++i) {
+                if (pillar.rings[i] === "red") r += 1;
+                else if (pillar.rings[i] === "blue") b += 1;
+            }
+            // Top ring (last in array) is worth 3
+            if (pillar.rings[pillar.rings.length - 1] === "red") r += 3;
+            else if (pillar.rings[pillar.rings.length - 1] === "blue") b += 3;
+            red += r;
+            blue += b;
+        }
+        // Wall stakes (x=72*inches, y=0 or y=144*inches)
+        if (
+            pillar.position.x === 72 * inches &&
+            (pillar.position.y === 0 || pillar.position.y === 144 * inches) &&
+            pillar.rings && pillar.rings.length > 0
+        ) {
+            // No multiplier for wall stakes
+            let r = 0, b = 0;
+            for (let i = 0; i < pillar.rings.length - 1; ++i) {
+                if (pillar.rings[i] === "red") r += 1;
+                else if (pillar.rings[i] === "blue") b += 1;
+            }
+            // Top ring (last in array) is worth 3
+            if (pillar.rings[pillar.rings.length - 1] === "red") r += 3;
+            else if (pillar.rings[pillar.rings.length - 1] === "blue") b += 3;
+            red += r;
+            blue += b;
+        }
+    });
 
     // Clamp to zero (no negative scores)
     red = Math.max(0, red);
@@ -553,6 +927,75 @@ function drawMogoRingStack(ctx, mogo) {
         if (mogo.rings && ringIdx < mogo.rings.length) {
             ctx.globalAlpha = 0.65;
             ctx.fillStyle = mogo.rings[ringIdx] === "red" ? red : blue;
+        } else {
+            ctx.globalAlpha = 0.85;
+            ctx.fillStyle = "#222";
+        }
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+
+        ctx.restore();
+    }
+}
+
+// Draws the ring stack indicator for alliance/wall stakes
+function drawStakeRingStack(ctx, stake, slotCount, side = "left", verticalOffset = 0) {
+    const slotWidth = 20;
+    const slotHeight = 8;
+    const slotSpacing = 2;
+    const radius = stake.circleRadius || stake.radius || (2 * inches);
+
+    let baseX = stake.position.x, baseY = stake.position.y;
+    let dx = 0, dy = 0;
+
+    if (side === "left") {
+        dx = -(radius + 14);
+        dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
+    } else if (side === "right") {
+        dx = radius + 14;
+        dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
+    }
+
+    // Determine if this is the top wall stake (fill from top to bottom)
+    const isTopWallStake = (stake.position.x === 72 * inches && stake.position.y === 0);
+
+    for (let i = 0; i < slotCount; ++i) {
+        let x = baseX, y = baseY;
+        // Only vertical stacking for all stakes
+        x += dx;
+        // For top wall stake, fill from top to bottom (first ring fills top slot)
+        if (isTopWallStake) {
+            y += dy - (slotCount - 1 - i) * (slotHeight + slotSpacing);
+        } else {
+            y += dy - i * (slotHeight + slotSpacing);
+        }
+
+        ctx.save();
+        ctx.translate(x, y);
+
+        ctx.beginPath();
+        const r = 4;
+        ctx.moveTo(-slotWidth / 2 + r, -slotHeight / 2);
+        ctx.lineTo(slotWidth / 2 - r, -slotHeight / 2);
+        ctx.quadraticCurveTo(slotWidth / 2, -slotHeight / 2, slotWidth / 2, -slotHeight / 2 + r);
+        ctx.lineTo(slotWidth / 2, slotHeight / 2 - r);
+        ctx.quadraticCurveTo(slotWidth / 2, slotHeight / 2, slotWidth / 2 - r, slotHeight / 2);
+        ctx.lineTo(-slotWidth / 2 + r, slotHeight / 2);
+        ctx.quadraticCurveTo(-slotWidth / 2, slotHeight / 2, -slotWidth / 2, slotHeight / 2 - r);
+        ctx.lineTo(-slotWidth / 2, -slotHeight / 2 + r);
+        ctx.quadraticCurveTo(-slotWidth / 2, -slotHeight / 2, -slotWidth / 2 + r, -slotHeight / 2);
+        ctx.closePath();
+
+        // Fill with color if this slot is filled (bottom-up for most, top-down for top wall stake)
+        let ringIdx;
+        if (isTopWallStake) {
+            ringIdx = i; // top slot is index 0
+        } else {
+            ringIdx = i;
+        }
+        if (stake.rings && ringIdx < stake.rings.length) {
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = stake.rings[ringIdx] === "red" ? red : blue;
         } else {
             ctx.globalAlpha = 0.85;
             ctx.fillStyle = "#222";
