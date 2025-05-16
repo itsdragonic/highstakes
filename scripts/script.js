@@ -163,19 +163,129 @@ rings.forEach(ring => {
     World.add(world, [ring.outer, ring.inner]);
 });
 
+// Add this after rings.forEach(ring => { World.add(world, [ring.outer, ring.inner]); }); and before World.add(world, ...)
+Events.on(engine, 'collisionStart', function(event) {
+    const velocityThreshold = 2.0; // adjust as needed for "scattering"
+    const margin = RING_OUTER_RADIUS + 2; // margin to keep rings inside field
+    event.pairs.forEach(pair => {
+        let robotBody = null, ringBody = null, ringObj = null;
+        // Find if robot is involved and which ring (outer) is involved
+        if (pair.bodyA === robot) {
+            robotBody = pair.bodyA;
+            ringObj = rings.find(r => r.outer === pair.bodyB);
+            ringBody = pair.bodyB;
+        } else if (pair.bodyB === robot) {
+            robotBody = pair.bodyB;
+            ringObj = rings.find(r => r.outer === pair.bodyA);
+            ringBody = pair.bodyA;
+        }
+        if (robotBody && ringObj && ringObj.outer.rings && Array.isArray(ringObj.outer.rings) && ringObj.outer.rings.length > 0) {
+            // Check robot velocity magnitude
+            const v = Math.sqrt(robot.velocity.x * robot.velocity.x + robot.velocity.y * robot.velocity.y);
+            if (v > velocityThreshold) {
+                // Scatter all rings in the array
+                const baseX = ringObj.outer.position.x;
+                const baseY = ringObj.outer.position.y;
+                const angleStep = (2 * Math.PI) / Math.max(1, ringObj.outer.rings.length);
+                for (let i = 0; i < ringObj.outer.rings.length; ++i) {
+                    const colorName = ringObj.outer.rings[i];
+                    const color = colorName === "red" ? red : blue;
+                    // Spread out in a circle
+                    const angle = i * angleStep + Math.random() * 0.2;
+                    const scatterDist = 12 + Math.random() * 8;
+                    // Clamp spawn position inside field
+                    let x = baseX + Math.cos(angle) * scatterDist;
+                    let y = baseY + Math.sin(angle) * scatterDist;
+                    x = Math.max(margin, Math.min(FIELD_SIZE - margin, x));
+                    y = Math.max(margin, Math.min(FIELD_SIZE - margin, y));
+                    const outer = Bodies.circle(x, y, RING_OUTER_RADIUS, {
+                        isSensor: false,
+                        friction: 1.0,
+                        frictionStatic: 1.0,
+                        restitution: 0.5,
+                        density: 0.05,
+                        render: { visible: false }
+                    });
+                    const inner = Bodies.circle(x, y, RING_INNER_RADIUS, {
+                        isSensor: true,
+                        render: { visible: false }
+                    });
+                    rings.push({ outer, inner, color });
+                    World.add(world, [outer, inner]);
+                    // Give a random velocity for scatter effect
+                    Body.setVelocity(outer, {
+                        x: robot.velocity.x + Math.cos(angle) * (1.5 + Math.random()),
+                        y: robot.velocity.y + Math.sin(angle) * (1.5 + Math.random())
+                    });
+                    Body.setAngularVelocity(outer, (Math.random() - 0.5) * 0.2);
+                }
+                // Clear the array
+                ringObj.outer.rings = [];
+            }
+        }
+    });
+});
+
 World.add(world, [robot, ...boundaries, ...pillars, ...mogos]);
+
+// Timer/game state
+let timerActive = false;
+let timeLeft = 120; // seconds
+let timerInterval = null;
+
+const timerElem = document.getElementById('timer');
+const startBtn = document.getElementById('start-btn');
+
+function formatTime(secs) {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateTimerDisplay() {
+    if (timerElem) timerElem.textContent = formatTime(timeLeft);
+}
+
+function startGame() {
+    if (timerActive) return;
+    timerActive = true;
+    timeLeft = 120;
+    updateTimerDisplay();
+    startBtn.disabled = true;
+    timerInterval = setInterval(() => {
+        if (timeLeft > 0) {
+            timeLeft--;
+            updateTimerDisplay();
+            if (timeLeft === 0) {
+                timerActive = false;
+                startBtn.disabled = false;
+                clearInterval(timerInterval);
+            }
+        }
+    }, 1000);
+}
+if (startBtn) startBtn.addEventListener('click', startGame);
+updateTimerDisplay();
 
 const keys = { w: false, a: false, s: false, d: false, r: false, j: false, l: false, t: false };
 let mouseDown = false;
 let rightMouseDown = false;
 
-document.addEventListener('keydown', e => { if (e.key in keys) keys[e.key] = true; });
-document.addEventListener('keyup', e => { if (e.key in keys) keys[e.key] = false; });
+document.addEventListener('keydown', e => {
+    if (!timerActive || timeLeft <= 0) return;
+    if (e.key in keys) keys[e.key] = true;
+});
+document.addEventListener('keyup', e => {
+    if (!timerActive || timeLeft <= 0) return;
+    if (e.key in keys) keys[e.key] = false;
+});
 document.addEventListener('mousedown', e => { 
+    if (!timerActive || timeLeft <= 0) return;
     if (e.button === 0) mouseDown = true; 
     if (e.button === 2) rightMouseDown = true;
 });
 document.addEventListener('mouseup', e => { 
+    if (!timerActive || timeLeft <= 0) return;
     if (e.button === 0) mouseDown = false; 
     if (e.button === 2) rightMouseDown = false;
 });
@@ -189,7 +299,22 @@ let lastRState = false;
 
 // Animation state for grabbed rings
 // Now also track if the animation has been "scored" or "ejected"
-let animatingRings = []; // {color, start, relFrom, relTo, relAngle, done, elapsed, lastTimestamp, paused, direction, ejectedFront, ejectedBack}
+let animatingRings = [
+    // Add a ring inside the robot at start (halfway through animation)
+    {
+        color: red, // or blue if you want blue instead
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * 600, // halfway through conveyorSpeed
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false
+    }
+];
 let conveyorSpeed = 600;
 
 let wallStakeScoreHoldStart = null; // Track when t is first held for wall stake scoring
@@ -292,17 +417,23 @@ Events.on(engine, 'beforeUpdate', () => {
         attachedMogo.angle = robot.angle;
     }
 
-    if (keys.a) Body.setAngularVelocity(robot, -turnSpeed);
-    if (keys.d) Body.setAngularVelocity(robot, turnSpeed);
-    if (keys.w || keys.s) {
-        const angle = robot.angle;
-        const dir = keys.w ? 1 : -1;
-        Body.applyForce(robot, robot.position, {
-            x: Math.cos(angle) * forceMagnitude * dir,
-            y: Math.sin(angle) * forceMagnitude * dir
-        });
+    // Only allow robot movement if timer is active and timeLeft > 0
+    if (timerActive && timeLeft > 0) {
+        if (keys.a) Body.setAngularVelocity(robot, -turnSpeed);
+        if (keys.d) Body.setAngularVelocity(robot, turnSpeed);
+        if (keys.w || keys.s) {
+            const angle = robot.angle;
+            const dir = keys.w ? 1 : -1;
+            Body.applyForce(robot, robot.position, {
+                x: Math.cos(angle) * forceMagnitude * dir,
+                y: Math.sin(angle) * forceMagnitude * dir
+            });
+        }
+        if (!keys.a && !keys.d) Body.setAngularVelocity(robot, 0);
+    } else {
+        // Prevent movement when timer is not active
+        Body.setAngularVelocity(robot, 0);
     }
-    if (!keys.a && !keys.d) Body.setAngularVelocity(robot, 0);
 
     // Ring grabbing: remove ring if in front and input is held
     if (keys.j || mouseDown) {
@@ -810,265 +941,104 @@ Events.on(render, 'afterRender', () => {
 Render.run(render);
 Runner.run(Runner.create(), engine);
 
-// Helper to draw a single ring at a position and angle
-// Add optional 'innerColor' parameter for the ring's inside
-function drawSingleRing(ctx, pos, color, angle = 0, innerColor = null) {
-    ctx.save();
-    ctx.translate(pos.x, pos.y);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.arc(0, 0, RING_OUTER_RADIUS, 0, 2 * Math.PI, false);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath();
-    ctx.arc(0, 0, RING_INNER_RADIUS, 0, 2 * Math.PI, false);
-    ctx.fill();
-    ctx.globalCompositeOperation = 'source-over';
-    // Draw inner color if provided (for rings on mogos)
-    if (innerColor) {
-        ctx.beginPath();
-        ctx.arc(0, 0, RING_INNER_RADIUS, 0, 2 * Math.PI, false);
-        ctx.fillStyle = innerColor;
-        ctx.fill();
-    }
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = (color == red) ? '#350f0f' : '#0f1d35';
-    ctx.beginPath();
-    ctx.arc(0, 0, RING_OUTER_RADIUS, 0, 2 * Math.PI);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(0, 0, RING_INNER_RADIUS, 0, 2 * Math.PI);
-    ctx.stroke();
-    ctx.restore();
-}
+// --- Reset button logic ---
+const resetBtn = document.getElementById('reset-btn');
 
-// Utility: check if a point is in a right triangle at a corner
-function pointInCornerTriangle(px, py, corner) {
-    if (corner === "top-left") {
-        return px >= 0 && px <= triSize && py >= 0 && py <= triSize && (px + py <= triSize);
-    } else if (corner === "top-right") {
-        return px <= FIELD_SIZE && px >= FIELD_SIZE - triSize && py >= 0 && py <= triSize && (FIELD_SIZE - px + py <= triSize);
-    } else if (corner === "bottom-left") {
-        return px >= 0 && px <= triSize && py <= FIELD_SIZE && py >= FIELD_SIZE - triSize && (px + FIELD_SIZE - py <= triSize);
-    } else if (corner === "bottom-right") {
-        return px <= FIELD_SIZE && px >= FIELD_SIZE - triSize && py <= FIELD_SIZE && py >= FIELD_SIZE - triSize && (FIELD_SIZE - px + FIELD_SIZE - py <= triSize);
-    }
-    return false;
-}
+// Store initial positions for reset
+const INITIAL_ROBOT = { x: 50, y: 400, angle: 0 };
+const INITIAL_MOGOS = [
+    { x: 48, y: 48 },
+    { x: 96, y: 48 },
+    { x: 48, y: 96 },
+    { x: 96, y: 96 },
+    { x: 72, y: 121 }
+];
+const INITIAL_PILLAR_RINGS = [
+    undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined
+];
+const INITIAL_RING_POSITIONS = RING_POSITIONS.map(r => ({
+    x: r.x, y: r.y, color: r.color, rings: r.rings ? [...r.rings] : undefined
+}));
 
-// Scoreboard logic
-function updateScoreboard() {
-    let red = 0, blue = 0;
+function resetField() {
+    // Stop timer
+    timerActive = false;
+    if (timerInterval) clearInterval(timerInterval);
+    timeLeft = 120;
+    updateTimerDisplay();
+    startBtn.disabled = false;
 
-    function scoreMogoRings(rings, multiplier) {
-        if (!rings || rings.length === 0) return { red: 0, blue: 0 };
-        let r = 0, b = 0;
-        for (let i = 0; i < rings.length - 1; ++i) {
-            if (rings[i] === "red") r += 1 * multiplier;
-            else if (rings[i] === "blue") b += 1 * multiplier;
-        }
-        // Top ring (last in array) is worth 3 * multiplier
-        if (rings.length > 0) {
-            if (rings[rings.length - 1] === "red") r += 3 * multiplier;
-            else if (rings[rings.length - 1] === "blue") b += 3 * multiplier;
-        }
-        return { red: r, blue: b };
-    }
+    // Reset robot position and velocity
+    Body.setPosition(robot, { x: INITIAL_ROBOT.x, y: INITIAL_ROBOT.y });
+    Body.setAngle(robot, INITIAL_ROBOT.angle);
+    Body.setVelocity(robot, { x: 0, y: 0 });
+    Body.setAngularVelocity(robot, 0);
 
-    function getCornerMultiplier(x, y) {
-        if (pointInCornerTriangle(x, y, "bottom-left") || pointInCornerTriangle(x, y, "bottom-right")) {
-            return 2; // double points
-        }
-        if (pointInCornerTriangle(x, y, "top-left") || pointInCornerTriangle(x, y, "top-right")) {
-            return -2; // double negative points
-        }
-        return 1;
-    }
+    // Remove all mogos from world
+    mogos.forEach(mogo => World.remove(world, mogo));
+    // Recreate mogos
+    mogos = INITIAL_MOGOS.map(pos => {
+        const body = createMogo(pos.x * inches, pos.y * inches);
+        body.rings = [];
+        return body;
+    });
+    mogos.forEach(mogo => World.add(world, mogo));
 
-    mogos.forEach(mogo => {
-        const mx = mogo.position.x;
-        const my = mogo.position.y;
-        const mult = getCornerMultiplier(mx, my);
-        const s = scoreMogoRings(mogo.rings, mult);
-        red += s.red;
-        blue += s.blue;
+    // Remove attached mogo if any
+    attachedMogo = null;
+
+    // Remove all rings from world
+    rings.forEach(ring => {
+        World.remove(world, ring.outer);
+        World.remove(world, ring.inner);
+    });
+    rings.length = 0;
+
+    // Recreate rings
+    INITIAL_RING_POSITIONS.forEach(({ x, y, color, rings: ringArr }) => {
+        const outer = Bodies.circle(x * inches, y * inches, RING_OUTER_RADIUS, {
+            isSensor: false,
+            friction: 1.0,
+            frictionStatic: 1.0,
+            restitution: 0,
+            density: 0.05,
+            render: { visible: false }
+        });
+        const inner = Bodies.circle(x * inches, y * inches, RING_INNER_RADIUS, {
+            isSensor: true,
+            render: { visible: false }
+        });
+        if (ringArr && Array.isArray(ringArr)) outer.rings = [...ringArr];
+        rings.push({ outer, inner, color });
+        World.add(world, [outer, inner]);
     });
 
-    if (attachedMogo) {
-        const mx = attachedMogo.position.x;
-        const my = attachedMogo.position.y;
-        const mult = getCornerMultiplier(mx, my);
-        const s = scoreMogoRings(attachedMogo.rings, mult);
-        red += s.red;
-        blue += s.blue;
-    }
-
-    // Score alliance and wall stakes
-    pillars.forEach(pillar => {
-        // Alliance stakes (x=0 or x=144*inches, y=72*inches)
-        if (
-            (pillar.position.x === 0 || pillar.position.x === 144 * inches) &&
-            pillar.position.y === 72 * inches &&
-            pillar.rings && pillar.rings.length > 0
-        ) {
-            // No multiplier for alliance stakes
-            let r = 0, b = 0;
-            for (let i = 0; i < pillar.rings.length - 1; ++i) {
-                if (pillar.rings[i] === "red") r += 1;
-                else if (pillar.rings[i] === "blue") b += 1;
-            }
-            // Top ring (last in array) is worth 3
-            if (pillar.rings[pillar.rings.length - 1] === "red") r += 3;
-            else if (pillar.rings[pillar.rings.length - 1] === "blue") b += 3;
-            red += r;
-            blue += b;
-        }
-        // Wall stakes (x=72*inches, y=0 or y=144*inches)
-        if (
-            pillar.position.x === 72 * inches &&
-            (pillar.position.y === 0 || pillar.position.y === 144 * inches) &&
-            pillar.rings && pillar.rings.length > 0
-        ) {
-            // No multiplier for wall stakes
-            let r = 0, b = 0;
-            for (let i = 0; i < pillar.rings.length - 1; ++i) {
-                if (pillar.rings[i] === "red") r += 1;
-                else if (pillar.rings[i] === "blue") b += 1;
-            }
-            // Top ring (last in array) is worth 3
-            if (pillar.rings[pillar.rings.length - 1] === "red") r += 3;
-            else if (pillar.rings[pillar.rings.length - 1] === "blue") b += 3;
-            red += r;
-            blue += b;
-        }
+    // Reset pillar rings
+    pillars.forEach((pillar, i) => {
+        pillar.rings = INITIAL_PILLAR_RINGS[i] ? [...INITIAL_PILLAR_RINGS[i]] : [];
     });
 
-    // Clamp to zero (no negative scores)
-    red = Math.max(0, red);
-    blue = Math.max(0, blue);
+    // Clear animating rings and add starting ring
+    animatingRings.length = 0;
+    animatingRings.push({
+        color: red, // or blue if you want blue instead
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * 600,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false
+    });
 
-    const redElem = document.getElementById('red-score');
-    const blueElem = document.getElementById('blue-score');
-    if (redElem) redElem.textContent = red;
-    if (blueElem) blueElem.textContent = blue;
+    // Clear keys and mouse
+    Object.keys(keys).forEach(k => keys[k] = false);
+    mouseDown = false;
+    rightMouseDown = false;
 }
 
-// Draws the ring stack indicator for a mogo (6 slots, filled from bottom up)
-// Always vertical, not rotated, wider and less tall, fills from bottom up
-function drawMogoRingStack(ctx, mogo) {
-    const slotCount = 6;
-    const slotWidth = 20;
-    const slotHeight = 8;
-    const slotSpacing = 2;
-    const radius = mogo.radius || MOGO_RADIUS;
-    // Position to the left of the mogo (relative to field, not angle)
-    const offset = radius + 14;
-    const baseX = mogo.position.x - offset;
-    const baseY = mogo.position.y + ((slotCount - 1) * (slotHeight + slotSpacing)) / 2;
-
-    for (let i = 0; i < slotCount; ++i) {
-        const x = baseX;
-        const y = baseY - i * (slotHeight + slotSpacing);
-
-        ctx.save();
-        ctx.translate(x, y);
-
-        // Draw rounded rectangle (dark gray or colored if filled)
-        ctx.beginPath();
-        const r = 4;
-        ctx.moveTo(-slotWidth / 2 + r, -slotHeight / 2);
-        ctx.lineTo(slotWidth / 2 - r, -slotHeight / 2);
-        ctx.quadraticCurveTo(slotWidth / 2, -slotHeight / 2, slotWidth / 2, -slotHeight / 2 + r);
-        ctx.lineTo(slotWidth / 2, slotHeight / 2 - r);
-        ctx.quadraticCurveTo(slotWidth / 2, slotHeight / 2, slotWidth / 2 - r, slotHeight / 2);
-        ctx.lineTo(-slotWidth / 2 + r, slotHeight / 2);
-        ctx.quadraticCurveTo(-slotWidth / 2, slotHeight / 2, -slotWidth / 2, slotHeight / 2 - r);
-        ctx.lineTo(-slotWidth / 2, -slotHeight / 2 + r);
-        ctx.quadraticCurveTo(-slotWidth / 2, -slotHeight / 2, -slotWidth / 2 + r, -slotHeight / 2);
-        ctx.closePath();
-
-        // Fill with color if this slot is filled (bottom-up), else dark gray
-        const ringIdx = i;
-        if (mogo.rings && ringIdx < mogo.rings.length) {
-            ctx.globalAlpha = 0.65;
-            ctx.fillStyle = mogo.rings[ringIdx] === "red" ? red : blue;
-        } else {
-            ctx.globalAlpha = 0.85;
-            ctx.fillStyle = "#222";
-        }
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
-
-        ctx.restore();
-    }
-}
-
-// Draws the ring stack indicator for alliance/wall stakes
-function drawStakeRingStack(ctx, stake, slotCount, side = "left", verticalOffset = 0) {
-    const slotWidth = 20;
-    const slotHeight = 8;
-    const slotSpacing = 2;
-    const radius = stake.circleRadius || stake.radius || (2 * inches);
-
-    let baseX = stake.position.x, baseY = stake.position.y;
-    let dx = 0, dy = 0;
-
-    if (side === "left") {
-        dx = -(radius + 18);
-        dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
-    } else if (side === "right") {
-        dx = radius + 18;
-        dy = ((slotCount - 1) * (slotHeight + slotSpacing)) / 2 + verticalOffset;
-    }
-
-    // Determine if this is the top wall stake (fill from top to bottom)
-    const isTopWallStake = (stake.position.x === 72 * inches && stake.position.y === 0);
-
-    for (let i = 0; i < slotCount; ++i) {
-        let x = baseX, y = baseY;
-        // Only vertical stacking for all stakes
-        x += dx;
-        // For top wall stake, fill from top to bottom (first ring fills top slot)
-        if (isTopWallStake) {
-            y += dy - (slotCount - 1 - i) * (slotHeight + slotSpacing);
-        } else {
-            y += dy - i * (slotHeight + slotSpacing);
-        }
-
-        ctx.save();
-        ctx.translate(x, y);
-
-        ctx.beginPath();
-        const r = 4;
-        ctx.moveTo(-slotWidth / 2 + r, -slotHeight / 2);
-        ctx.lineTo(slotWidth / 2 - r, -slotHeight / 2);
-        ctx.quadraticCurveTo(slotWidth / 2, -slotHeight / 2, slotWidth / 2, -slotHeight / 2 + r);
-        ctx.lineTo(slotWidth / 2, slotHeight / 2 - r);
-        ctx.quadraticCurveTo(slotWidth / 2, slotHeight / 2, slotWidth / 2 - r, slotHeight / 2);
-        ctx.lineTo(-slotWidth / 2 + r, slotHeight / 2);
-        ctx.quadraticCurveTo(-slotWidth / 2, slotHeight / 2, -slotWidth / 2, slotHeight / 2 - r);
-        ctx.lineTo(-slotWidth / 2, -slotHeight / 2 + r);
-        ctx.quadraticCurveTo(-slotWidth / 2, -slotHeight / 2, -slotWidth / 2 + r, -slotHeight / 2);
-        ctx.closePath();
-
-        // Fill with color if this slot is filled (bottom-up for most, top-down for top wall stake)
-        let ringIdx;
-        if (isTopWallStake) {
-            ringIdx = i; // top slot is index 0
-        } else {
-            ringIdx = i;
-        }
-        if (stake.rings && ringIdx < stake.rings.length) {
-            ctx.globalAlpha = 0.65;
-            ctx.fillStyle = stake.rings[ringIdx] === "red" ? red : blue;
-        } else {
-            ctx.globalAlpha = 0.85;
-            ctx.fillStyle = "#222";
-        }
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
-
-        ctx.restore();
-    }
-}
+if (resetBtn) resetBtn.addEventListener('click', resetField);
