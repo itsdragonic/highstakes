@@ -67,6 +67,15 @@
       font-weight: 700;
       letter-spacing: 2px;
     }
+
+    #ladder {
+      position: absolute;
+      top: calc(50% - 110px);
+      left: calc(50% - 110px);
+      width: 221px;
+      height: auto;
+      z-index: 99;
+    }
   </style>
 </head>
 
@@ -87,6 +96,7 @@
     <canvas id="game-canvas"></canvas>
   </div>
   <canvas id="background-canvas"></canvas>
+  <img id="ladder" src="ladder.png"/>
 
   <script src="scripts/highstakes.js"></script>
   <script src="scripts/script.js"></script>
