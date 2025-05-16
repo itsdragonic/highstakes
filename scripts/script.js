@@ -38,11 +38,40 @@ positionBackground();
 // Create robot(s)
 const robot = Bodies.rectangle(50, 400, ROBOT_HEIGHT, ROBOT_WIDTH, {
     frictionAir: 0.2,
+    restitution: 0,
+    render: {
+        fillStyle: '#cb2828',
+        visible: true
+    }
+});
+const robot2 = Bodies.rectangle(50, 180, ROBOT_HEIGHT, ROBOT_WIDTH, {
+    frictionAir: 0.2,
+    restitution: 0,
+    render: {
+        fillStyle: '#cb2828',
+        visible: true
+    }
+});
+const robot3 = Bodies.rectangle(525, 180, ROBOT_HEIGHT, ROBOT_WIDTH, {
+    frictionAir: 0.2,
+    restitution: 0,
+    angle: Math.PI,
     render: {
         fillStyle: '#0077ff',
         visible: true
     }
 });
+const robot4 = Bodies.rectangle(525, 400, ROBOT_HEIGHT, ROBOT_WIDTH, {
+    frictionAir: 0.2,
+    restitution: 0,
+    angle: Math.PI,
+    render: {
+        fillStyle: '#0077ff',
+        visible: true
+    }
+});
+
+const user = robot;
 
 // Create Pillars
 const thickness = 20;
@@ -165,23 +194,24 @@ rings.forEach(ring => {
 
 // Add this after rings.forEach(ring => { World.add(world, [ring.outer, ring.inner]); }); and before World.add(world, ...)
 Events.on(engine, 'collisionStart', function(event) {
-    const velocityThreshold = 2.0; // adjust as needed for "scattering"
+    const velocityThreshold = 2.3; // adjust as needed for "scattering"
     const margin = RING_OUTER_RADIUS + 2; // margin to keep rings inside field
     event.pairs.forEach(pair => {
         let robotBody = null, ringBody = null, ringObj = null;
-        // Find if robot is involved and which ring (outer) is involved
-        if (pair.bodyA === robot) {
+        // Find if any robot is involved and which ring (outer) is involved
+        const robots = [robot, robot2, robot3, robot4];
+        if (robots.includes(pair.bodyA)) {
             robotBody = pair.bodyA;
             ringObj = rings.find(r => r.outer === pair.bodyB);
             ringBody = pair.bodyB;
-        } else if (pair.bodyB === robot) {
+        } else if (robots.includes(pair.bodyB)) {
             robotBody = pair.bodyB;
             ringObj = rings.find(r => r.outer === pair.bodyA);
             ringBody = pair.bodyA;
         }
         if (robotBody && ringObj && ringObj.outer.rings && Array.isArray(ringObj.outer.rings) && ringObj.outer.rings.length > 0) {
             // Check robot velocity magnitude
-            const v = Math.sqrt(robot.velocity.x * robot.velocity.x + robot.velocity.y * robot.velocity.y);
+            const v = Math.sqrt(robotBody.velocity.x * robotBody.velocity.x + robotBody.velocity.y * robotBody.velocity.y);
             if (v > velocityThreshold) {
                 // Scatter all rings in the array
                 const baseX = ringObj.outer.position.x;
@@ -214,8 +244,8 @@ Events.on(engine, 'collisionStart', function(event) {
                     World.add(world, [outer, inner]);
                     // Give a random velocity for scatter effect
                     Body.setVelocity(outer, {
-                        x: robot.velocity.x + Math.cos(angle) * (1.5 + Math.random()),
-                        y: robot.velocity.y + Math.sin(angle) * (1.5 + Math.random())
+                        x: robotBody.velocity.x + Math.cos(angle) * (1.5 + Math.random()),
+                        y: robotBody.velocity.y + Math.sin(angle) * (1.5 + Math.random())
                     });
                     Body.setAngularVelocity(outer, (Math.random() - 0.5) * 0.2);
                 }
@@ -226,7 +256,7 @@ Events.on(engine, 'collisionStart', function(event) {
     });
 });
 
-World.add(world, [robot, ...boundaries, ...pillars, ...mogos]);
+World.add(world, [robot, robot2, robot3, robot4, ...boundaries, ...pillars, ...mogos]);
 
 // Timer/game state
 let timerActive = false;
@@ -244,6 +274,7 @@ function formatTime(secs) {
 
 function updateTimerDisplay() {
     if (timerElem) timerElem.textContent = formatTime(timeLeft);
+    window.timeLeft = timeLeft; // keep global for highstakes.js
 }
 
 function startGame() {
@@ -267,7 +298,9 @@ function startGame() {
 if (startBtn) startBtn.addEventListener('click', startGame);
 updateTimerDisplay();
 
-const keys = { w: false, a: false, s: false, d: false, r: false, j: false, l: false, t: false };
+const keys = { w: false, a: false, s: false, d: false, r: false, j: false, l: false, t: false,
+               ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false };
+
 let mouseDown = false;
 let rightMouseDown = false;
 
@@ -296,6 +329,7 @@ const forceMagnitude = 0.01;
 const turnSpeed = 0.04;
 let attachedMogo = null;
 let lastRState = false;
+let conveyorSpeed = 600;
 
 // Animation state for grabbed rings
 // Now also track if the animation has been "scored" or "ejected"
@@ -307,15 +341,57 @@ let animatingRings = [
         relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
         relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
         relAngle: 0,
-        elapsed: 0.5 * 600, // halfway through conveyorSpeed
+        elapsed: 0.5 * conveyorSpeed,
         lastTimestamp: performance.now(),
         paused: true,
         direction: 0,
         ejectedFront: false,
-        ejectedBack: false
+        ejectedBack: false,
+        robot: robot
+    },
+    {
+        color: red,
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * conveyorSpeed,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false,
+        robot: robot2
+    },
+    {
+        color: blue,
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * conveyorSpeed,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false,
+        robot: robot3
+    },
+    {
+        color: blue,
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * conveyorSpeed,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false,
+        robot: robot4
     }
 ];
-let conveyorSpeed = 600;
 
 let wallStakeScoreHoldStart = null; // Track when t is first held for wall stake scoring
 
@@ -325,11 +401,10 @@ const holdTime = 1500;
 Events.on(engine, 'beforeUpdate', () => {
     // Prevent grabbing/releasing mogos if robot is pressed too far into an edge or corner
     function isRobotTooFarInEdgeOrCorner() {
-        const margin = 2; // allow release very close to the edge
-        // Check if robot's back (where mogo is grabbed/released) is too far outside field
+        const margin = 2;
         const backOffset = ROBOT_HEIGHT * 0.55;
-        const backX = robot.position.x - Math.cos(robot.angle) * backOffset;
-        const backY = robot.position.y - Math.sin(robot.angle) * backOffset;
+        const backX = user.position.x - Math.cos(user.angle) * backOffset;
+        const backY = user.position.y - Math.sin(user.angle) * backOffset;
         if (
             backX < margin ||
             backX > FIELD_SIZE - margin ||
@@ -357,8 +432,8 @@ Events.on(engine, 'beforeUpdate', () => {
             } else if (!attachedMogo) {
                 const backOffset = ROBOT_HEIGHT * 0.55;
                 const backPosition = {
-                    x: robot.position.x - Math.cos(robot.angle) * backOffset,
-                    y: robot.position.y - Math.sin(robot.angle) * backOffset
+                    x: user.position.x - Math.cos(user.angle) * backOffset,
+                    y: user.position.y - Math.sin(user.angle) * backOffset
                 };
                 let closestMogo = null;
                 let closestDistance = MOGO_RADIUS * 1.3;
@@ -374,10 +449,9 @@ Events.on(engine, 'beforeUpdate', () => {
                 if (closestMogo) {
                     World.remove(world, closestMogo);
                     mogos.splice(closestIndex, 1);
-                    // Preserve rings array
                     attachedMogo = {
                         position: { x: backPosition.x, y: backPosition.y },
-                        angle: robot.angle,
+                        angle: user.angle,
                         radius: MOGO_RADIUS,
                         color: MOGO_COLOR,
                         rings: (closestMogo.rings && Array.isArray(closestMogo.rings)) ? [...closestMogo.rings] : []
@@ -386,8 +460,8 @@ Events.on(engine, 'beforeUpdate', () => {
             } else {
                 // Only allow release if not too far in edge/corner
                 const releaseOffset = ROBOT_HEIGHT;
-                const releaseX = robot.position.x - Math.cos(robot.angle) * releaseOffset;
-                const releaseY = robot.position.y - Math.sin(robot.angle) * releaseOffset;
+                const releaseX = user.position.x - Math.cos(user.angle) * releaseOffset;
+                const releaseY = user.position.y - Math.sin(user.angle) * releaseOffset;
                 const margin = 2; // allow release very close to the edge
                 if (
                     releaseX < margin ||
@@ -411,55 +485,53 @@ Events.on(engine, 'beforeUpdate', () => {
     if (attachedMogo) {
         const offset = ROBOT_HEIGHT * 0.6;
         attachedMogo.position = {
-            x: robot.position.x - Math.cos(robot.angle) * offset,
-            y: robot.position.y - Math.sin(robot.angle) * offset
+            x: user.position.x - Math.cos(user.angle) * offset,
+            y: user.position.y - Math.sin(user.angle) * offset
         };
-        attachedMogo.angle = robot.angle;
+        attachedMogo.angle = user.angle;
     }
 
     // Only allow robot movement if timer is active and timeLeft > 0
     if (timerActive && timeLeft > 0) {
-        if (keys.a) Body.setAngularVelocity(robot, -turnSpeed);
-        if (keys.d) Body.setAngularVelocity(robot, turnSpeed);
+        // Robot 1 (WASD)
+        if (keys.a) Body.setAngularVelocity(user, -turnSpeed);
+        if (keys.d) Body.setAngularVelocity(user, turnSpeed);
         if (keys.w || keys.s) {
-            const angle = robot.angle;
+            const angle = user.angle;
             const dir = keys.w ? 1 : -1;
-            Body.applyForce(robot, robot.position, {
+            Body.applyForce(user, user.position, {
                 x: Math.cos(angle) * forceMagnitude * dir,
                 y: Math.sin(angle) * forceMagnitude * dir
             });
         }
-        if (!keys.a && !keys.d) Body.setAngularVelocity(robot, 0);
+        if (!keys.a && !keys.d) Body.setAngularVelocity(user, 0);
     } else {
         // Prevent movement when timer is not active
-        Body.setAngularVelocity(robot, 0);
+        Body.setAngularVelocity(user, 0);
     }
 
     // Ring grabbing: remove ring if in front and input is held
     if (keys.j || mouseDown) {
         const now = performance.now();
-        if (now - lastRingPickupTime >= 500) { // 0.5s cooldown
+        if (now - lastRingPickupTime >= 500) {
             const frontOffset = ROBOT_HEIGHT / 2;
             const backOffset = -ROBOT_HEIGHT * 0.6;
-            // Calculate RELATIVE front/back (relative to robot center, facing forward)
             const relFront = {
-                x: Math.cos(robot.angle) * frontOffset,
-                y: Math.sin(robot.angle) * frontOffset
+                x: Math.cos(user.angle) * frontOffset,
+                y: Math.sin(user.angle) * frontOffset
             };
             const relBack = {
-                x: Math.cos(robot.angle) * backOffset,
-                y: Math.sin(robot.angle) * backOffset
+                x: Math.cos(user.angle) * backOffset,
+                y: Math.sin(user.angle) * backOffset
             };
-            // World positions for hit detection
             const frontPos = {
-                x: robot.position.x + relFront.x,
-                y: robot.position.y + relFront.y
+                x: user.position.x + relFront.x,
+                y: user.position.y + relFront.y
             };
             for (let i = 0; i < rings.length; ++i) {
                 const ring = rings[i];
                 const dist = Matter.Vector.magnitude(Matter.Vector.sub(ring.outer.position, frontPos));
                 if (dist < RING_OUTER_RADIUS + 8) {
-                    // --- Virtual below logic using .rings property on outer body ---
                     if (ring.outer.rings && ring.outer.rings.length > 0) {
                         const belowColor = ring.outer.rings.pop();
                         animatingRings.push({
@@ -471,14 +543,14 @@ Events.on(engine, 'beforeUpdate', () => {
                             elapsed: 0,
                             lastTimestamp: performance.now(),
                             paused: false,
-                            direction: 1, // 1 = forward, -1 = reverse
+                            direction: 1,
                             ejectedFront: false,
-                            ejectedBack: false
+                            ejectedBack: false,
+                            robot: user
                         });
                         lastRingPickupTime = now;
                         break;
                     }
-                    // ...existing code...
                     World.remove(world, ring.outer);
                     World.remove(world, ring.inner);
                     animatingRings.push({
@@ -490,9 +562,10 @@ Events.on(engine, 'beforeUpdate', () => {
                         elapsed: 0,
                         lastTimestamp: performance.now(),
                         paused: false,
-                        direction: 1, // 1 = forward, -1 = reverse
+                        direction: 1,
                         ejectedFront: false,
-                        ejectedBack: false
+                        ejectedBack: false,
+                        robot: user
                     });
                     rings.splice(i, 1);
                     lastRingPickupTime = now;
@@ -541,16 +614,17 @@ Events.on(engine, 'beforeUpdate', () => {
     for (let i = animatingRings.length - 1; i >= 0; --i) {
         const anim = animatingRings[i];
 
+        // Only process ejection/scoring for the user-controlled robot's animating rings
+        if ((anim.robot && anim.robot !== user)) continue;
+
         // Determine direction: forward (j/left mouse), reverse (l/right mouse)
         let forward = keys.j || mouseDown;
         let reverse = keys.l || rightMouseDown;
 
-        // If both are held, prioritize reverse
         let direction = 0;
         if (reverse) direction = -1;
         else if (forward) direction = 1;
 
-        // Only update direction if not done
         if (!anim.done) {
             if (direction !== 0) {
                 if (anim.paused || anim.direction !== direction) {
@@ -558,11 +632,9 @@ Events.on(engine, 'beforeUpdate', () => {
                 }
                 anim.paused = false;
                 anim.direction = direction;
-                // Advance or reverse animation
                 let delta = now - anim.lastTimestamp;
                 anim.lastTimestamp = now;
                 anim.elapsed += delta * direction;
-                // Clamp elapsed between 0 and ANIMATION_DURATION
                 if (anim.elapsed > conveyorSpeed) anim.elapsed = conveyorSpeed;
                 if (anim.elapsed < 0) anim.elapsed = 0;
             } else {
@@ -577,8 +649,8 @@ Events.on(engine, 'beforeUpdate', () => {
         // If t is held, and the front of the robot is adjacent to a wall stake, start/continue hold timer
         if (!anim.done) {
             const frontOffset = ROBOT_HEIGHT / 2;
-            const frontX = robot.position.x + Math.cos(robot.angle) * frontOffset;
-            const frontY = robot.position.y + Math.sin(robot.angle) * frontOffset;
+            const frontX = user.position.x + Math.cos(user.angle) * frontOffset;
+            const frontY = user.position.y + Math.sin(user.angle) * frontOffset;
             const wallStake = getAdjacentWallStake(frontX, frontY);
 
             // Only track hold for the first animating ring (one at a time)
@@ -603,8 +675,8 @@ Events.on(engine, 'beforeUpdate', () => {
             // Try to score on alliance stake if not holding a mogo and back is adjacent
             if (!attachedMogo) {
                 const backOffset = -ROBOT_HEIGHT * 0.8;
-                const backX = robot.position.x + Math.cos(robot.angle) * backOffset;
-                const backY = robot.position.y + Math.sin(robot.angle) * backOffset;
+                const backX = user.position.x + Math.cos(user.angle) * backOffset;
+                const backY = user.position.y + Math.sin(user.angle) * backOffset;
                 const stake = getAdjacentAllianceStake(backX, backY);
                 if (stake && (!stake.rings || stake.rings.length < 2)) {
                     // Only allow scoring if ring color matches alliance
@@ -636,8 +708,8 @@ Events.on(engine, 'beforeUpdate', () => {
             } else {
                 // Eject out the back as a new ring with hitbox, only if not too close to edge
                 const backOffset = -ROBOT_HEIGHT * 0.8;
-                const ejectX = robot.position.x + Math.cos(robot.angle) * backOffset;
-                const ejectY = robot.position.y + Math.sin(robot.angle) * backOffset;
+                const ejectX = user.position.x + Math.cos(user.angle) * backOffset;
+                const ejectY = user.position.y + Math.sin(user.angle) * backOffset;
                 if (!isPositionTooCloseToEdge(ejectX, ejectY)) {
                     const color = anim.color;
                     const outer = Bodies.circle(ejectX, ejectY, RING_OUTER_RADIUS, {
@@ -666,8 +738,8 @@ Events.on(engine, 'beforeUpdate', () => {
         if (!anim.done && anim.direction === -1 && t <= 0 && !anim.ejectedFront) {
             // Eject out the front as a new ring with hitbox, only if not too close to edge
             const frontOffset = ROBOT_HEIGHT / 2 + 4;
-            const ejectX = robot.position.x + Math.cos(robot.angle) * frontOffset;
-            const ejectY = robot.position.y + Math.sin(robot.angle) * frontOffset;
+            const ejectX = user.position.x + Math.cos(user.angle) * frontOffset;
+            const ejectY = user.position.y + Math.sin(user.angle) * frontOffset;
             if (!isPositionTooCloseToEdge(ejectX, ejectY)) {
                 const color = anim.color;
                 const outer = Bodies.circle(ejectX, ejectY, RING_OUTER_RADIUS, {
@@ -696,7 +768,87 @@ Events.on(engine, 'beforeUpdate', () => {
             animatingRings.splice(i, 1);
         }
     }
+
+    // --- Prevent robots from crossing x=72*inches in first 15 seconds ---
+    if (timerActive && timeLeft > 105) { // first 15 seconds
+        const robotsArr = [robot, robot2, robot3, robot4];
+        const midX = 72 * inches;
+        robotsArr.forEach(rb => {
+            // If robot is on the left and tries to cross to the right
+            if (rb.position.x < midX && rb.position.x > midX - ROBOT_WIDTH / 2) {
+                Body.setPosition(rb, { x: midX - ROBOT_WIDTH / 2, y: rb.position.y });
+                Body.setVelocity(rb, { x: Math.min(0, rb.velocity.x), y: rb.velocity.y });
+            }
+            // If robot is on the right and tries to cross to the left
+            if (rb.position.x > midX && rb.position.x < midX + ROBOT_WIDTH / 2) {
+                Body.setPosition(rb, { x: midX + ROBOT_WIDTH / 2, y: rb.position.y });
+                Body.setVelocity(rb, { x: Math.max(0, rb.velocity.x), y: rb.velocity.y });
+            }
+        });
+    }
+
+    // --- In the last 30 seconds, mogos in positive corners cannot be moved ---
+    function isInPositiveCorner(x, y) {
+        // bottom-left
+        if (x >= 0 && x <= triSize && y <= FIELD_SIZE && y >= FIELD_SIZE - triSize && (x + FIELD_SIZE - y <= triSize)) {
+            return true;
+        }
+        // bottom-right
+        if (x <= FIELD_SIZE && x >= FIELD_SIZE - triSize && y <= FIELD_SIZE && y >= FIELD_SIZE - triSize && (FIELD_SIZE - x + FIELD_SIZE - y <= triSize)) {
+            return true;
+        }
+        return false;
+    }
+
+    if (timerActive && timeLeft <= 30) {
+        // Find all mogos in positive corners
+        protectedCornerMogos = [];
+        mogos.forEach(mogo => {
+            if (isInPositiveCorner(mogo.position.x, mogo.position.y)) {
+                if (!mogo.isStatic) {
+                    Body.setStatic(mogo, true);
+                }
+                protectedCornerMogos.push(mogo);
+            } else {
+                if (mogo.isStatic) {
+                    Body.setStatic(mogo, false);
+                }
+            }
+        });
+        // Also check attachedMogo (if it's in a corner, make it static and detach)
+        if (attachedMogo && isInPositiveCorner(attachedMogo.position.x, attachedMogo.position.y)) {
+            // Make it static and add to mogos if not already
+            if (!attachedMogo.isStatic) {
+                Body.setStatic(attachedMogo, true);
+            }
+            mogos.push(attachedMogo);
+            attachedMogo = null;
+        }
+    } else {
+        // Restore all mogos to movable if not in protected period
+        mogos.forEach(mogo => {
+            if (mogo.isStatic) {
+                Body.setStatic(mogo, false);
+            }
+        });
+        protectedCornerMogos = [];
+    }
+
+    // --- Velocity cap for all robots ---
+    const robotsArr = [robot, robot2, robot3, robot4];
+    const MAX_VEL = 7; // adjust as needed (units per tick)
+    robotsArr.forEach(rb => {
+        const v = Math.sqrt(rb.velocity.x * rb.velocity.x + rb.velocity.y * rb.velocity.y);
+        if (v > MAX_VEL) {
+            const scale = MAX_VEL / v;
+            Body.setVelocity(rb, {
+                x: rb.velocity.x * scale,
+                y: rb.velocity.y * scale
+            });
+        }
+    });
 });
+
 const triSize = 19 * inches;
 
 Events.on(render, 'afterRender', () => {
@@ -726,6 +878,10 @@ Events.on(render, 'afterRender', () => {
     drawCornerTriangle(ctx, FIELD_SIZE, FIELD_SIZE, triSize, "transparent", true, true);
 
     drawFrontTriangle(ctx, robot);
+    drawFrontTriangle(ctx, robot2);
+    drawFrontTriangle(ctx, robot3);
+    drawFrontTriangle(ctx, robot4);
+
 
     // Draw mogos with visible ring (last in array, if any)
     mogos.forEach(mogo => {
@@ -818,8 +974,8 @@ Events.on(render, 'afterRender', () => {
                     ) {
                         // Check if robot is adjacent to THIS wall stake (within 20 units)
                         const frontOffset = ROBOT_HEIGHT / 2;
-                        const frontX = robot.position.x + Math.cos(robot.angle) * frontOffset;
-                        const frontY = robot.position.y + Math.sin(robot.angle) * frontOffset;
+                        const frontX = user.position.x + Math.cos(user.angle) * frontOffset;
+                        const frontY = user.position.y + Math.sin(user.angle) * frontOffset;
                         if (
                             Math.abs(pillar.position.x - frontX) < 20 &&
                             Math.abs(pillar.position.y - frontY) < 20
@@ -926,12 +1082,13 @@ Events.on(render, 'afterRender', () => {
             // Animate in robot-relative coordinates, so ring always stays inside robot
             const relX = anim.relFrom.x * (1 - t) + anim.relTo.x * t;
             const relY = anim.relFrom.y * (1 - t) + anim.relTo.y * t;
-            const cos = Math.cos(robot.angle);
-            const sin = Math.sin(robot.angle);
-            const x = robot.position.x + relX * cos - relY * sin;
-            const y = robot.position.y + relX * sin + relY * cos;
+            const robotRef = anim.robot || robot;
+            const cos = Math.cos(robotRef.angle);
+            const sin = Math.sin(robotRef.angle);
+            const x = robotRef.position.x + relX * cos - relY * sin;
+            const y = robotRef.position.y + relX * sin + relY * cos;
             // Use robot color for the inside of animating rings
-            drawSingleRing(ctx, { x, y }, anim.color, robot.angle + (anim.relAngle || 0), robot.render.fillStyle);
+            drawSingleRing(ctx, { x, y }, anim.color, robotRef.angle + (anim.relAngle || 0), robotRef.render.fillStyle);
         }
         // No need to draw ejected ring here, as it's added to rings[]
     });
@@ -969,11 +1126,29 @@ function resetField() {
     updateTimerDisplay();
     startBtn.disabled = false;
 
-    // Reset robot position and velocity
+    // Reset robot positions and velocities
     Body.setPosition(robot, { x: INITIAL_ROBOT.x, y: INITIAL_ROBOT.y });
     Body.setAngle(robot, INITIAL_ROBOT.angle);
     Body.setVelocity(robot, { x: 0, y: 0 });
     Body.setAngularVelocity(robot, 0);
+
+    // Reset robot2
+    Body.setPosition(robot2, { x: 50, y: 180 });
+    Body.setAngle(robot2, 0);
+    Body.setVelocity(robot2, { x: 0, y: 0 });
+    Body.setAngularVelocity(robot2, 0);
+
+    // Reset robot3
+    Body.setPosition(robot3, { x: 525, y: 180 });
+    Body.setAngle(robot3, Math.PI);
+    Body.setVelocity(robot3, { x: 0, y: 0 });
+    Body.setAngularVelocity(robot3, 0);
+
+    // Reset robot4
+    Body.setPosition(robot4, { x: 525, y: 400 });
+    Body.setAngle(robot4, Math.PI);
+    Body.setVelocity(robot4, { x: 0, y: 0 });
+    Body.setAngularVelocity(robot4, 0);
 
     // Remove all mogos from world
     mogos.forEach(mogo => World.remove(world, mogo));
@@ -1021,18 +1196,62 @@ function resetField() {
 
     // Clear animating rings and add starting ring
     animatingRings.length = 0;
+    // Add preload ring for each robot
     animatingRings.push({
-        color: red, // or blue if you want blue instead
+        color: red,
         start: performance.now(),
         relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
         relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
         relAngle: 0,
-        elapsed: 0.5 * 600,
+        elapsed: 0.5 * conveyorSpeed,
         lastTimestamp: performance.now(),
         paused: true,
         direction: 0,
         ejectedFront: false,
-        ejectedBack: false
+        ejectedBack: false,
+        robot: robot
+    });
+    animatingRings.push({
+        color: red,
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * conveyorSpeed,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false,
+        robot: robot2
+    });
+    animatingRings.push({
+        color: blue,
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * conveyorSpeed,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false,
+        robot: robot3
+    });
+    animatingRings.push({
+        color: blue,
+        start: performance.now(),
+        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
+        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
+        relAngle: 0,
+        elapsed: 0.5 * conveyorSpeed,
+        lastTimestamp: performance.now(),
+        paused: true,
+        direction: 0,
+        ejectedFront: false,
+        ejectedBack: false,
+        robot: robot4
     });
 
     // Clear keys and mouse

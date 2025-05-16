@@ -80,8 +80,30 @@ function pointInCornerTriangle(px, py, corner) {
 }
 
 // Scoreboard logic
+// DQ state for each alliance
+let redDQ = false;
+let blueDQ = false;
+
 function updateScoreboard() {
     let red = 0, blue = 0;
+
+    // --- Store which mogos are in positive corners at t=30s ---
+    if (typeof window.positiveCornerMogosAt30 === "undefined") {
+        window.positiveCornerMogosAt30 = null;
+    }
+    if (typeof window.timeLeft !== "undefined" && window.timeLeft === 30) {
+        // Find mogos in positive corners at t=30s
+        window.positiveCornerMogosAt30 = mogos
+            .filter(mogo => pointInCornerTriangle(mogo.position.x, mogo.position.y, "bottom-left") ||
+                            pointInCornerTriangle(mogo.position.x, mogo.position.y, "bottom-right"))
+            .map(mogo => mogo);
+        // Also include attachedMogo if in positive corner
+        if (attachedMogo &&
+            (pointInCornerTriangle(attachedMogo.position.x, attachedMogo.position.y, "bottom-left") ||
+             pointInCornerTriangle(attachedMogo.position.x, attachedMogo.position.y, "bottom-right"))) {
+            window.positiveCornerMogosAt30.push(attachedMogo);
+        }
+    }
 
     function scoreMogoRings(rings, multiplier) {
         if (!rings || rings.length === 0) return { red: 0, blue: 0 };
@@ -99,13 +121,33 @@ function updateScoreboard() {
     }
 
     function getCornerMultiplier(x, y) {
-        if (pointInCornerTriangle(x, y, "bottom-left") || pointInCornerTriangle(x, y, "bottom-right")) {
-            return 2; // double points
+        // After t=30s, only mogos that were in the positive corners at t=30s get the bonus
+        if (typeof window.timeLeft !== "undefined" && window.timeLeft < 30) {
+            if (window.positiveCornerMogosAt30) {
+                // Only double if this mogo is one of the snapshot mogos
+                for (const mogo of window.positiveCornerMogosAt30) {
+                    if (Math.abs(mogo.position.x - x) < 1 && Math.abs(mogo.position.y - y) < 1) {
+                        if (pointInCornerTriangle(x, y, "bottom-left") || pointInCornerTriangle(x, y, "bottom-right")) {
+                            return 2;
+                        }
+                    }
+                }
+            }
+            // Otherwise, no bonus
+            if (pointInCornerTriangle(x, y, "top-left") || pointInCornerTriangle(x, y, "top-right")) {
+                return -2;
+            }
+            return 1;
+        } else {
+            // Before last 30s, normal logic
+            if (pointInCornerTriangle(x, y, "bottom-left") || pointInCornerTriangle(x, y, "bottom-right")) {
+                return 2; // double points
+            }
+            if (pointInCornerTriangle(x, y, "top-left") || pointInCornerTriangle(x, y, "top-right")) {
+                return -2; // double negative points
+            }
+            return 1;
         }
-        if (pointInCornerTriangle(x, y, "top-left") || pointInCornerTriangle(x, y, "top-right")) {
-            return -2; // double negative points
-        }
-        return 1;
     }
 
     mogos.forEach(mogo => {
@@ -170,10 +212,11 @@ function updateScoreboard() {
     red = Math.max(0, red);
     blue = Math.max(0, blue);
 
+    // Apply DQ: if DQ'd, score is always 0 and display "DQ"
     const redElem = document.getElementById('red-score');
     const blueElem = document.getElementById('blue-score');
-    if (redElem) redElem.textContent = red;
-    if (blueElem) blueElem.textContent = blue;
+    if (redElem) redElem.textContent = redDQ ? "DQ" : red;
+    if (blueElem) blueElem.textContent = blueDQ ? "DQ" : blue;
 }
 
 // Draws the ring stack indicator for a mogo (6 slots, filled from bottom up)
