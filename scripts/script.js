@@ -491,74 +491,20 @@ Events.on(engine, 'beforeUpdate', () => {
         attachedMogo.angle = user.angle;
     }
 
-    // --- Prevent movement if possessing a mogo and front/back is touching a free mogo ---
-    let frontTouch = false, backTouch = false;
-    if (attachedMogo) {
-        // Calculate front and back positions
-        const frontOffset = ROBOT_HEIGHT / 2;
-        const backOffset = -ROBOT_HEIGHT * 0.6;
-        const frontPos = {
-            x: user.position.x + Math.cos(user.angle) * frontOffset,
-            y: user.position.y + Math.sin(user.angle) * frontOffset
-        };
-        const backPos = {
-            x: user.position.x + Math.cos(user.angle) * backOffset,
-            y: user.position.y + Math.sin(user.angle) * backOffset
-        };
-        // Check if front or back is close to a free mogo (not attached)
-        for (let i = 0; i < mogos.length; ++i) {
-            const mogo = mogos[i];
-            const distFront = Matter.Vector.magnitude(Matter.Vector.sub(mogo.position, frontPos));
-            const distBack = Matter.Vector.magnitude(Matter.Vector.sub(mogo.position, backPos));
-            if (distFront < MOGO_RADIUS + 6) frontTouch = true;
-            if (distBack < MOGO_RADIUS + 6) backTouch = true;
-        }
-        // If both front and back touch, block all movement and turning
-        // If only front touches, allow only backward, no turning
-        // If only back touches, allow only forward, no turning
-        // If neither, allow both and turning
-    }
-
     // Only allow robot movement if timer is active and timeLeft > 0
-    if (timerActive && timeLeft > 0 && !user.isStatic) {
-        // --- Movement restriction logic based on mogo touching ---
-        let allowForward = true, allowBackward = true, allowTurn = true;
-        if (attachedMogo) {
-            if (frontTouch && backTouch) {
-                allowForward = false;
-                allowBackward = false;
-                allowTurn = false;
-            } else if (frontTouch) {
-                allowForward = false;
-                allowTurn = false;
-            } else if (backTouch) {
-                allowBackward = false;
-                allowTurn = false;
-            }
-        }
-        // Turning
-        if (allowTurn) {
-            if (keys.a) Body.setAngularVelocity(user, -turnSpeed);
-            if (keys.d) Body.setAngularVelocity(user, turnSpeed);
-        } else {
-            Body.setAngularVelocity(user, 0);
-        }
-        // Only apply force if allowed
-        if (
-            ((keys.w && allowForward) || (keys.s && allowBackward))
-        ) {
+    if (timerActive && timeLeft > 0) {
+        // Robot 1 (WASD)
+        if (keys.a) Body.setAngularVelocity(user, -turnSpeed);
+        if (keys.d) Body.setAngularVelocity(user, turnSpeed);
+        if (keys.w || keys.s) {
             const angle = user.angle;
-            let dir = 0;
-            if (keys.w && allowForward) dir += 1;
-            if (keys.s && allowBackward) dir -= 1;
-            if (dir !== 0) {
-                Body.applyForce(user, user.position, {
-                    x: Math.cos(angle) * forceMagnitude * dir,
-                    y: Math.sin(angle) * forceMagnitude * dir
-                });
-            }
+            const dir = keys.w ? 1 : -1;
+            Body.applyForce(user, user.position, {
+                x: Math.cos(angle) * forceMagnitude * dir,
+                y: Math.sin(angle) * forceMagnitude * dir
+            });
         }
-        if (!allowTurn && (!keys.a && !keys.d)) Body.setAngularVelocity(user, 0);
+        if (!keys.a && !keys.d) Body.setAngularVelocity(user, 0);
     } else {
         // Prevent movement when timer is not active
         Body.setAngularVelocity(user, 0);
