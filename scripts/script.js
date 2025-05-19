@@ -266,35 +266,6 @@ let timerInterval = null;
 const timerElem = document.getElementById('timer');
 const startBtn = document.getElementById('start-btn');
 
-function formatTime(secs) {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function updateTimerDisplay() {
-    if (timerElem) timerElem.textContent = formatTime(timeLeft);
-    window.timeLeft = timeLeft; // keep global for highstakes.js
-}
-
-function startGame() {
-    if (timerActive) return;
-    timerActive = true;
-    timeLeft = 120;
-    updateTimerDisplay();
-    startBtn.disabled = true;
-    timerInterval = setInterval(() => {
-        if (timeLeft > 0) {
-            timeLeft--;
-            updateTimerDisplay();
-            if (timeLeft === 0) {
-                timerActive = false;
-                startBtn.disabled = false;
-                clearInterval(timerInterval);
-            }
-        }
-    }, 1000);
-}
 if (startBtn) startBtn.addEventListener('click', startGame);
 updateTimerDisplay();
 
@@ -400,31 +371,7 @@ const holdTime = 1500;
 
 Events.on(engine, 'beforeUpdate', () => {
     // Prevent grabbing/releasing mogos if robot is pressed too far into an edge or corner
-    function isRobotTooFarInEdgeOrCorner() {
-        const margin = 2;
-        const backOffset = ROBOT_HEIGHT * 0.55;
-        const backX = user.position.x - Math.cos(user.angle) * backOffset;
-        const backY = user.position.y - Math.sin(user.angle) * backOffset;
-        if (
-            backX < margin ||
-            backX > FIELD_SIZE - margin ||
-            backY < margin ||
-            backY > FIELD_SIZE - margin
-        ) {
-            return true;
-        }
-        return false;
-    }
-
-    function isPositionTooCloseToEdge(x, y, margin = 2) {
-        return (
-            x < margin ||
-            x > FIELD_SIZE - margin ||
-            y < margin ||
-            y > FIELD_SIZE - margin
-        );
-    }
-
+    
     if (keys.r !== lastRState) {
         if (keys.r) {
             if (isRobotTooFarInEdgeOrCorner()) {
@@ -513,10 +460,6 @@ Events.on(engine, 'beforeUpdate', () => {
             if (distFront < MOGO_RADIUS + 6) frontTouch = true;
             if (distBack < MOGO_RADIUS + 6) backTouch = true;
         }
-        // If both front and back touch, block all movement and turning
-        // If only front touches, allow only backward, no turning
-        // If only back touches, allow only forward, no turning
-        // If neither, allow both and turning
     }
 
     // Only allow robot movement if timer is active and timeLeft > 0
@@ -627,40 +570,6 @@ Events.on(engine, 'beforeUpdate', () => {
                 }
             }
         }
-    }
-
-    // Helper: find alliance stake adjacent to a given (x, y)
-    function getAdjacentAllianceStake(x, y, margin = 12) {
-        for (const pillar of pillars) {
-            // Only alliance stakes (x=0 or x=144*inches, y=72*inches)
-            if (
-                (pillar.position.x === 0 || pillar.position.x === 144 * inches) &&
-                pillar.position.y === 72 * inches
-            ) {
-                const dist = Matter.Vector.magnitude(Matter.Vector.sub({ x, y }, pillar.position));
-                if (dist < (pillar.circleRadius || pillar.radius || 2 * inches) + margin) {
-                    return pillar;
-                }
-            }
-        }
-        return null;
-    }
-
-    // Helper: find wall stake adjacent to a given (x, y)
-    function getAdjacentWallStake(x, y, margin = 12) {
-        for (const pillar of pillars) {
-            // Only wall stakes (x=72*inches, y=0 or y=144*inches)
-            if (
-                pillar.position.x === 72 * inches &&
-                (pillar.position.y === 0 || pillar.position.y === 144 * inches)
-            ) {
-                const dist = Matter.Vector.magnitude(Matter.Vector.sub({ x, y }, pillar.position));
-                if (dist < (pillar.circleRadius || pillar.radius || 2 * inches) + margin) {
-                    return pillar;
-                }
-            }
-        }
-        return null;
     }
 
     // Remove finished animations (after 1 second) and handle scoring/ejection
@@ -841,19 +750,6 @@ Events.on(engine, 'beforeUpdate', () => {
         });
     }
 
-    // --- In the last 30 seconds, mogos in positive corners cannot be moved ---
-    function isInPositiveCorner(x, y) {
-        // bottom-left
-        if (x >= 0 && x <= triSize && y <= FIELD_SIZE && y >= FIELD_SIZE - triSize && (x + FIELD_SIZE - y <= triSize)) {
-            return true;
-        }
-        // bottom-right
-        if (x <= FIELD_SIZE && x >= FIELD_SIZE - triSize && y <= FIELD_SIZE && y >= FIELD_SIZE - triSize && (FIELD_SIZE - x + FIELD_SIZE - y <= triSize)) {
-            return true;
-        }
-        return false;
-    }
-
     if (timerActive && timeLeft <= 30) {
         // Find all mogos in positive corners
         protectedCornerMogos = [];
@@ -908,20 +804,6 @@ const triSize = 19 * inches;
 Events.on(render, 'afterRender', () => {
     const ctx = render.context;
 
-    // Draw 4 corner right angle triangles
-    function drawCornerTriangle(ctx, x, y, size, color, flipX, flipY) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + size * (flipX ? -1 : 1), y);
-        ctx.lineTo(x, y + size * (flipY ? -1 : 1));
-        ctx.closePath();
-        ctx.globalAlpha = 0.25;
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
-        ctx.restore();
-    }
     // Top-left
     drawCornerTriangle(ctx, 0, 0, triSize, "transparent", false, false);
     // Top-right
@@ -1171,147 +1053,5 @@ const INITIAL_PILLAR_RINGS = [
 const INITIAL_RING_POSITIONS = RING_POSITIONS.map(r => ({
     x: r.x, y: r.y, color: r.color, rings: r.rings ? [...r.rings] : undefined
 }));
-
-function resetField() {
-    // Stop timer
-    timerActive = false;
-    if (timerInterval) clearInterval(timerInterval);
-    timeLeft = 120;
-    updateTimerDisplay();
-    startBtn.disabled = false;
-
-    // Reset robot positions and velocities
-    Body.setPosition(robot, { x: INITIAL_ROBOT.x, y: INITIAL_ROBOT.y });
-    Body.setAngle(robot, INITIAL_ROBOT.angle);
-    Body.setVelocity(robot, { x: 0, y: 0 });
-    Body.setAngularVelocity(robot, 0);
-
-    // Reset robot2
-    Body.setPosition(robot2, { x: 50, y: 180 });
-    Body.setAngle(robot2, 0);
-    Body.setVelocity(robot2, { x: 0, y: 0 });
-    Body.setAngularVelocity(robot2, 0);
-
-    // Reset robot3
-    Body.setPosition(robot3, { x: 525, y: 180 });
-    Body.setAngle(robot3, Math.PI);
-    Body.setVelocity(robot3, { x: 0, y: 0 });
-    Body.setAngularVelocity(robot3, 0);
-
-    // Reset robot4
-    Body.setPosition(robot4, { x: 525, y: 400 });
-    Body.setAngle(robot4, Math.PI);
-    Body.setVelocity(robot4, { x: 0, y: 0 });
-    Body.setAngularVelocity(robot4, 0);
-
-    // Remove all mogos from world
-    mogos.forEach(mogo => World.remove(world, mogo));
-    // Recreate mogos
-    mogos = INITIAL_MOGOS.map(pos => {
-        const body = createMogo(pos.x * inches, pos.y * inches);
-        body.rings = [];
-        return body;
-    });
-    mogos.forEach(mogo => World.add(world, mogo));
-
-    // Remove attached mogo if any
-    attachedMogo = null;
-
-    // Remove all rings from world
-    rings.forEach(ring => {
-        World.remove(world, ring.outer);
-        World.remove(world, ring.inner);
-    });
-    rings.length = 0;
-
-    // Recreate rings
-    INITIAL_RING_POSITIONS.forEach(({ x, y, color, rings: ringArr }) => {
-        const outer = Bodies.circle(x * inches, y * inches, RING_OUTER_RADIUS, {
-            isSensor: false,
-            friction: 1.0,
-            frictionStatic: 1.0,
-            restitution: 0,
-            density: 0.05,
-            render: { visible: false }
-        });
-        const inner = Bodies.circle(x * inches, y * inches, RING_INNER_RADIUS, {
-            isSensor: true,
-            render: { visible: false }
-        });
-        if (ringArr && Array.isArray(ringArr)) outer.rings = [...ringArr];
-        rings.push({ outer, inner, color });
-        World.add(world, [outer, inner]);
-    });
-
-    // Reset pillar rings
-    pillars.forEach((pillar, i) => {
-        pillar.rings = INITIAL_PILLAR_RINGS[i] ? [...INITIAL_PILLAR_RINGS[i]] : [];
-    });
-
-    // Clear animating rings and add starting ring
-    animatingRings.length = 0;
-    // Add preload ring for each robot
-    animatingRings.push({
-        color: red,
-        start: performance.now(),
-        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
-        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
-        relAngle: 0,
-        elapsed: 0.5 * conveyorSpeed,
-        lastTimestamp: performance.now(),
-        paused: true,
-        direction: 0,
-        ejectedFront: false,
-        ejectedBack: false,
-        robot: robot
-    });
-    animatingRings.push({
-        color: red,
-        start: performance.now(),
-        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
-        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
-        relAngle: 0,
-        elapsed: 0.5 * conveyorSpeed,
-        lastTimestamp: performance.now(),
-        paused: true,
-        direction: 0,
-        ejectedFront: false,
-        ejectedBack: false,
-        robot: robot2
-    });
-    animatingRings.push({
-        color: blue,
-        start: performance.now(),
-        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
-        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
-        relAngle: 0,
-        elapsed: 0.5 * conveyorSpeed,
-        lastTimestamp: performance.now(),
-        paused: true,
-        direction: 0,
-        ejectedFront: false,
-        ejectedBack: false,
-        robot: robot3
-    });
-    animatingRings.push({
-        color: blue,
-        start: performance.now(),
-        relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
-        relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
-        relAngle: 0,
-        elapsed: 0.5 * conveyorSpeed,
-        lastTimestamp: performance.now(),
-        paused: true,
-        direction: 0,
-        ejectedFront: false,
-        ejectedBack: false,
-        robot: robot4
-    });
-
-    // Clear keys and mouse
-    Object.keys(keys).forEach(k => keys[k] = false);
-    mouseDown = false;
-    rightMouseDown = false;
-}
 
 if (resetBtn) resetBtn.addEventListener('click', resetField);
