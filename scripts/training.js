@@ -1,4 +1,4 @@
-// Parameters
+/*// Parameters
 const inputSize = 6; // [robot x, y, angle, vx, vy, timeLeft]
 const numActions = 6; // [forward, backward, left, right, grab (j/mouseDown), score (t)]
 const temporalWindow = 1;
@@ -43,16 +43,20 @@ function getState() {
 }
 
 // --- Helper to set action(s) ---
-// Now supports multiple simultaneous actions using thresholded outputs
+// Only control robot1 (window.robot)
 function setAction(actionArr) {
     // actionArr: array of Q-values for each action
     // Actions: [w, s, a, d, j/mouseDown, t]
+    // Only set keys/mouse for robot1 (window.robot)
     Object.keys(window.keys).forEach(k => window.keys[k] = false);
     window.mouseDown = false;
     window.rightMouseDown = false;
 
     // Threshold for activation
-    const threshold = 0.5 * Math.max(...actionArr);
+    const maxVal = Math.max(...actionArr);
+    // If all actions are zero, do nothing
+    if (maxVal <= 0) return;
+    const threshold = 0.5 * maxVal;
 
     if (actionArr[0] >= threshold) window.keys.w = true;
     if (actionArr[1] >= threshold) window.keys.s = true;
@@ -60,6 +64,15 @@ function setAction(actionArr) {
     if (actionArr[3] >= threshold) window.keys.d = true;
     if (actionArr[4] >= threshold) { window.keys.j = true; window.mouseDown = true; }
     if (actionArr[5] >= threshold) window.keys.t = true;
+
+    // --- Force update of robot movement immediately ---
+    // This is necessary because the game only reads keys during event listeners,
+    // but here we are setting them programmatically.
+    // So, we need to manually trigger the robot movement logic.
+    // We'll call the beforeUpdate handler directly if possible.
+    if (typeof Matter !== "undefined" && Matter.Events && window.engine) {
+        Matter.Events.trigger(window.engine, 'beforeUpdate', {});
+    }
 }
 
 // --- Reward function ---
@@ -81,10 +94,15 @@ let prevX = window.robot.position.x;
 let prevY = window.robot.position.y;
 
 function trainingStep() {
+    // Start the game if not running
     if (!window.timerActive || window.timeLeft <= 0) {
-        // Restart game if needed
+        // Reset and start game automatically
         if (window.resetField) window.resetField();
-        setTimeout(trainingStep, 1000);
+        // Wait a bit for reset to finish
+        setTimeout(() => {
+            if (window.startGame) window.startGame();
+            setTimeout(trainingStep, 500);
+        }, 500);
         return;
     }
     // Observe reward
@@ -106,7 +124,8 @@ function trainingStep() {
 
     // Next step
     setTimeout(trainingStep, 50); // ~20Hz
+
 }
 
 // Start training after a short delay to allow game to load
-setTimeout(trainingStep, 2000);
+setTimeout(trainingStep, 2000);*/
