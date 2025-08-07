@@ -1,3 +1,5 @@
+let skillsMode = true;
+
 function startGame() {
     if (timerActive) return;
     timerActive = true;
@@ -196,6 +198,9 @@ function pointInCornerTriangle(px, py, corner) {
 }
 
 // Scoreboard logic
+let redScore = 0;
+let blueScore = 0;
+
 // DQ state for each alliance
 let redDQ = false;
 let blueDQ = false;
@@ -327,6 +332,9 @@ function updateScoreboard() {
     // Clamp to zero (no negative scores)
     red = Math.max(0, red);
     blue = Math.max(0, blue);
+
+    redScore = red;
+    blueScore = blue;
 
     // Apply DQ: if DQ'd, score is always 0 and display "DQ"
     const redElem = document.getElementById('red-score');

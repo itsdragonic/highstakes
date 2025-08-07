@@ -122,7 +122,6 @@ const mogoPositions = [
     { x: 72, y: 121 },
 ];
 
-// Add a blue ring to the first mogo for testing
 let mogos = mogoPositions.map((pos, i) => {
     const body = createMogo(pos.x * inches, pos.y * inches);
     body.rings = [];
@@ -307,7 +306,7 @@ let conveyorSpeed = 600;
 let animatingRings = [
     // Add a ring inside the robot at start (halfway through animation)
     {
-        color: red, // or blue if you want blue instead
+        color: red,
         start: performance.now(),
         relFrom: { x: ROBOT_HEIGHT / 2, y: 0 },
         relTo: { x: -ROBOT_HEIGHT * 0.6, y: 0 },
@@ -732,7 +731,7 @@ Events.on(engine, 'beforeUpdate', () => {
         }
     }
 
-    // --- Prevent robots from crossing x=72*inches in first 15 seconds ---
+    // Prevent crossing center line during auton
     if (timerActive && timeLeft > 105) { // first 15 seconds
         const robotsArr = [robot, robot2, robot3, robot4];
         const midX = 72 * inches;

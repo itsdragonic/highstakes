@@ -41,6 +41,18 @@
       pointer-events: none;
     }
 
+    #debug {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #222;
+      color: #fff;
+      padding: 16px 24px;
+      border-radius: 8px;
+      z-index: 10000;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
     /* Scoreboard and title formatting */
     #ui-container {
       display: flex;
@@ -72,6 +84,7 @@
 
     #ladder {
       position: absolute;
+      pointer-events: none;
       top: calc(50% - 110px);
       left: calc(50% - 110px);
       width: 221px;
@@ -99,6 +112,10 @@
   </div>
   <canvas id="background-canvas"></canvas>
   <img id="ladder" src="ladder.png"/>
+
+  <div id="debug">
+    <p></p>
+  </div>
 
   <script src="scripts/highstakes.js"></script>
   <script src="scripts/script.js"></script>
